@@ -21,6 +21,7 @@ namespace AssetStudioGUI.Scripts
 			public string file;
 			public string name;
 			public string type;
+			public long pathId;
 		}
 
 		private static AssetInfo GetAssetNameFromReader(ObjectReader objectReader)
@@ -38,6 +39,7 @@ namespace AssetStudioGUI.Scripts
 				case ClassIDType.SpriteAtlas:
 				case ClassIDType.TextAsset:
 				case ClassIDType.Texture2D:
+				case ClassIDType.Avatar:
 					var name = namedObj.m_Name;
 					info.name = name;
 					break;
@@ -46,6 +48,7 @@ namespace AssetStudioGUI.Scripts
 					break;
 			}
 
+			info.pathId = objectReader.m_PathID;
 			info.type = objectReader.type.ToString();
 			return info;
 		}
@@ -93,6 +96,7 @@ namespace AssetStudioGUI.Scripts
 											assetInfo.type = objectReader.type.ToString();
 											assetInfo.name = bundleItem.Key;
 											assetInfo.file = file;
+											assetInfo.pathId = objectReader.m_PathID;
 
 											list.Add(assetInfo);
 										}
@@ -124,7 +128,7 @@ namespace AssetStudioGUI.Scripts
 			{
 				foreach (var objectInfo in list)
 				{
-					outStream.WriteLine($"{objectInfo.file}; {objectInfo.type}; {objectInfo.name}");
+					outStream.WriteLine($"{objectInfo.file}; {objectInfo.type}; {objectInfo.name}; {objectInfo.pathId}");
 				}
 			}
 		}
