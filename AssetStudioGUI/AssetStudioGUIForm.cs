@@ -91,6 +91,9 @@ namespace AssetStudioGUI
 
 		private GUILogger logger;
 
+		// graphics
+		private Renderer renderer;
+
 		[DllImport("gdi32.dll")]
 		private static extern IntPtr AddFontMemResourceEx(IntPtr pbFont, uint cbFont, IntPtr pdv, [In] ref uint pcFonts);
 
@@ -111,6 +114,8 @@ namespace AssetStudioGUI
 			Progress.Default = new Progress<int>(SetProgressBarValue);
 			Studio.StatusStripUpdate = StatusStripUpdate;
 			UserScripts.StatusStripUpdate = StatusStripUpdate;
+
+			renderer = null;
 		}
 
 		private void AssetStudioGUIForm_DragEnter(object sender, DragEventArgs e)
@@ -730,7 +735,8 @@ namespace AssetStudioGUI
 					case Sprite m_Sprite:
 						PreviewSprite(assetItem, m_Sprite);
 						break;
-					case Animator _:
+					case Animator m_Animator:
+						PreviewAnimator(m_Animator);
 						StatusStripUpdate("Can be exported to FBX file.");
 						break;
 					case AnimationClip _:
@@ -1013,150 +1019,16 @@ namespace AssetStudioGUI
 
 		private void PreviewMesh(Mesh m_Mesh)
 		{
-			if (m_Mesh.m_VertexCount > 0)
+			glControl1.Visible = true;
+			if (!renderer.SetModel(m_Mesh))
 			{
-				viewMatrixData = Matrix4.CreateRotationY(-(float)Math.PI / 4) * Matrix4.CreateRotationX(-(float)Math.PI / 6);
-				#region Vertices
-				if (m_Mesh.m_Vertices == null || m_Mesh.m_Vertices.Length == 0)
-				{
-					StatusStripUpdate("Mesh can't be previewed.");
-					return;
-				}
-				int count = 3;
-				if (m_Mesh.m_Vertices.Length == m_Mesh.m_VertexCount * 4)
-				{
-					count = 4;
-				}
-				vertexData = new Vector3[m_Mesh.m_VertexCount];
-				// Calculate Bounding
-				float[] min = new float[3];
-				float[] max = new float[3];
-				for (int i = 0; i < 3; i++)
-				{
-					min[i] = m_Mesh.m_Vertices[i];
-					max[i] = m_Mesh.m_Vertices[i];
-				}
-				for (int v = 0; v < m_Mesh.m_VertexCount; v++)
-				{
-					for (int i = 0; i < 3; i++)
-					{
-						min[i] = Math.Min(min[i], m_Mesh.m_Vertices[v * count + i]);
-						max[i] = Math.Max(max[i], m_Mesh.m_Vertices[v * count + i]);
-					}
-					vertexData[v] = new Vector3(
-						m_Mesh.m_Vertices[v * count],
-						m_Mesh.m_Vertices[v * count + 1],
-						m_Mesh.m_Vertices[v * count + 2]);
-				}
-
-				// Calculate modelMatrix
-				Vector3 dist = Vector3.One, offset = Vector3.Zero;
-				for (int i = 0; i < 3; i++)
-				{
-					dist[i] = max[i] - min[i];
-					offset[i] = (max[i] + min[i]) / 2;
-				}
-				float d = Math.Max(1e-5f, dist.Length);
-				modelMatrixData = Matrix4.CreateTranslation(-offset) * Matrix4.CreateScale(2f / d);
-				#endregion
-				#region Indicies
-				indiceData = new int[m_Mesh.m_Indices.Count];
-				for (int i = 0; i < m_Mesh.m_Indices.Count; i = i + 3)
-				{
-					indiceData[i] = (int)m_Mesh.m_Indices[i];
-					indiceData[i + 1] = (int)m_Mesh.m_Indices[i + 1];
-					indiceData[i + 2] = (int)m_Mesh.m_Indices[i + 2];
-				}
-				#endregion
-				#region Normals
-				if (m_Mesh.m_Normals != null && m_Mesh.m_Normals.Length > 0)
-				{
-					if (m_Mesh.m_Normals.Length == m_Mesh.m_VertexCount * 3)
-						count = 3;
-					else if (m_Mesh.m_Normals.Length == m_Mesh.m_VertexCount * 4)
-						count = 4;
-					normalData = new Vector3[m_Mesh.m_VertexCount];
-					for (int n = 0; n < m_Mesh.m_VertexCount; n++)
-					{
-						normalData[n] = new Vector3(
-							m_Mesh.m_Normals[n * count],
-							m_Mesh.m_Normals[n * count + 1],
-							m_Mesh.m_Normals[n * count + 2]);
-					}
-				}
-				else
-					normalData = null;
-				// calculate normal by ourself
-				normal2Data = new Vector3[m_Mesh.m_VertexCount];
-				int[] normalCalculatedCount = new int[m_Mesh.m_VertexCount];
-				for (int i = 0; i < m_Mesh.m_VertexCount; i++)
-				{
-					normal2Data[i] = Vector3.Zero;
-					normalCalculatedCount[i] = 0;
-				}
-				for (int i = 0; i < m_Mesh.m_Indices.Count; i = i + 3)
-				{
-					Vector3 dir1 = vertexData[indiceData[i + 1]] - vertexData[indiceData[i]];
-					Vector3 dir2 = vertexData[indiceData[i + 2]] - vertexData[indiceData[i]];
-					Vector3 normal = Vector3.Cross(dir1, dir2);
-					normal.Normalize();
-					for (int j = 0; j < 3; j++)
-					{
-						normal2Data[indiceData[i + j]] += normal;
-						normalCalculatedCount[indiceData[i + j]]++;
-					}
-				}
-				for (int i = 0; i < m_Mesh.m_VertexCount; i++)
-				{
-					if (normalCalculatedCount[i] == 0)
-						normal2Data[i] = new Vector3(0, 1, 0);
-					else
-						normal2Data[i] /= normalCalculatedCount[i];
-				}
-				#endregion
-				#region Colors
-				if (m_Mesh.m_Colors != null && m_Mesh.m_Colors.Length == m_Mesh.m_VertexCount * 3)
-				{
-					colorData = new Vector4[m_Mesh.m_VertexCount];
-					for (int c = 0; c < m_Mesh.m_VertexCount; c++)
-					{
-						colorData[c] = new Vector4(
-							m_Mesh.m_Colors[c * 3],
-							m_Mesh.m_Colors[c * 3 + 1],
-							m_Mesh.m_Colors[c * 3 + 2],
-							1.0f);
-					}
-				}
-				else if (m_Mesh.m_Colors != null && m_Mesh.m_Colors.Length == m_Mesh.m_VertexCount * 4)
-				{
-					colorData = new Vector4[m_Mesh.m_VertexCount];
-					for (int c = 0; c < m_Mesh.m_VertexCount; c++)
-					{
-						colorData[c] = new Vector4(
-						m_Mesh.m_Colors[c * 4],
-						m_Mesh.m_Colors[c * 4 + 1],
-						m_Mesh.m_Colors[c * 4 + 2],
-						m_Mesh.m_Colors[c * 4 + 3]);
-					}
-				}
-				else
-				{
-					colorData = new Vector4[m_Mesh.m_VertexCount];
-					for (int c = 0; c < m_Mesh.m_VertexCount; c++)
-					{
-						colorData[c] = new Vector4(0.5f, 0.5f, 0.5f, 1.0f);
-					}
-				}
-				#endregion
-				glControl1.Visible = true;
-				CreateVAO();
-				StatusStripUpdate("Using OpenGL Version: " + GL.GetString(StringName.Version) + "\n"
-								  + "'Mouse Left'=Rotate | 'Mouse Right'=Move | 'Mouse Wheel'=Zoom \n"
-								  + "'Ctrl W'=Wireframe | 'Ctrl S'=Shade | 'Ctrl N'=ReNormal ");
-			}
-			else
-			{
+				glControl1.Visible = false;
 				StatusStripUpdate("Unable to preview this mesh");
+			} else
+			{
+				StatusStripUpdate("Using OpenGL Version: " + GL.GetString(StringName.Version) + "\n"
+									  + "'Mouse Left'=Rotate | 'Mouse Right'=Move | 'Mouse Wheel'=Zoom \n"
+									  + "'Ctrl W'=Wireframe | 'Ctrl S'=Shade | 'Ctrl N'=ReNormal ");
 			}
 		}
 
@@ -1984,58 +1856,20 @@ namespace AssetStudioGUI
 
 		private void ChangeGLSize(Size size)
 		{
-			GL.Viewport(0, 0, size.Width, size.Height);
-
-			if (size.Width <= size.Height)
-			{
-				float k = 1.0f * size.Width / size.Height;
-				projMatrixData = Matrix4.CreateScale(1, k, 1);
-			}
-			else
-			{
-				float k = 1.0f * size.Height / size.Width;
-				projMatrixData = Matrix4.CreateScale(k, 1, 1);
-			}
+			renderer.UpdateSize(size);
 		}
 
 		private void glControl1_Load(object sender, EventArgs e)
 		{
-			InitOpenTK();
+			// InitOpenTK();
+
+			renderer = new Renderer(glControl1);
 			glControlLoaded = true;
 		}
 
 		private void glControl1_Paint(object sender, PaintEventArgs e)
 		{
-			glControl1.MakeCurrent();
-			GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-			GL.Enable(EnableCap.DepthTest);
-			GL.DepthFunc(DepthFunction.Lequal);
-			GL.BindVertexArray(vao);
-			if (wireFrameMode == 0 || wireFrameMode == 2)
-			{
-				GL.UseProgram(shadeMode == 0 ? pgmID : pgmColorID);
-				GL.UniformMatrix4(uniformModelMatrix, false, ref modelMatrixData);
-				GL.UniformMatrix4(uniformViewMatrix, false, ref viewMatrixData);
-				GL.UniformMatrix4(uniformProjMatrix, false, ref projMatrixData);
-				GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
-				GL.DrawElements(BeginMode.Triangles, indiceData.Length, DrawElementsType.UnsignedInt, 0);
-			}
-			//Wireframe
-			if (wireFrameMode == 1 || wireFrameMode == 2)
-			{
-				GL.Enable(EnableCap.PolygonOffsetLine);
-				GL.PolygonOffset(-1, -1);
-				GL.UseProgram(pgmBlackID);
-				GL.UniformMatrix4(uniformModelMatrix, false, ref modelMatrixData);
-				GL.UniformMatrix4(uniformViewMatrix, false, ref viewMatrixData);
-				GL.UniformMatrix4(uniformProjMatrix, false, ref projMatrixData);
-				GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
-				GL.DrawElements(BeginMode.Triangles, indiceData.Length, DrawElementsType.UnsignedInt, 0);
-				GL.Disable(EnableCap.PolygonOffsetLine);
-			}
-			GL.BindVertexArray(0);
-			GL.Flush();
-			glControl1.SwapBuffers();
+			renderer.Redraw();
 		}
 
 		private void tabControl2_SelectedIndexChanged(object sender, EventArgs e)
@@ -2125,6 +1959,98 @@ namespace AssetStudioGUI
 			{
 				var folder = openFolderDialog.Folder;
 				await Task.Run(() => UserScripts.ExportAssetIndex(folder, "assetindex.csv"));
+			}
+		}
+
+		// Animator preview
+		// allows previewing animators and animation clips in the viewport
+		private void PreviewAnimator(Animator animator)
+		{
+			// var convert = animationList != null
+			//    ? new ModelConverter(m_Animator, Properties.Settings.Default.convertType, animationList.Select(x => (AnimationClip)x.Asset).ToArray())
+			//    : new ModelConverter(m_Animator, Properties.Settings.Default.convertType);
+
+			var convert = new ModelConverter(animator, Properties.Settings.Default.convertType);
+			var m_Mesh = convert.MeshList.FirstOrDefault();
+
+			if (m_Mesh.VertexList.Count > 0)
+			{
+				viewMatrixData = Matrix4.CreateRotationY(-(float)Math.PI / 4) * Matrix4.CreateRotationX(-(float)Math.PI / 6);
+				#region Vertices
+				if (m_Mesh.VertexList == null || m_Mesh.VertexList.Count == 0)
+				{
+					StatusStripUpdate("Mesh can't be previewed.");
+					return;
+				}
+
+				vertexData = new Vector3[m_Mesh.VertexList.Count];
+				// Calculate Bounding
+				Vector3 min = new Vector3(0.0f);
+				Vector3 max = new Vector3(0.0f);
+				for (int i = 0; i < 3; i++)
+				{
+					min[i] = m_Mesh.VertexList[i].Vertex.X;
+					max[i] = m_Mesh.VertexList[i].Vertex.X;
+				}
+				for (int v = 0; v < m_Mesh.VertexList.Count; v++)
+				{
+					for (int i = 0; i < 3; ++i)
+					{
+						min[i] = Math.Min(min[i], m_Mesh.VertexList[v].Vertex[i]);
+						max[i] = Math.Max(max[i], m_Mesh.VertexList[v].Vertex[i]);
+					}
+
+					vertexData[v] = new Vector3(m_Mesh.VertexList[v].Vertex.X, m_Mesh.VertexList[v].Vertex.Y, m_Mesh.VertexList[v].Vertex.Z);
+				}
+
+				// Calculate modelMatrix
+				Vector3 dist = Vector3.One, offset = Vector3.Zero;
+				for (int i = 0; i < 3; i++)
+				{
+					dist[i] = max[i] - min[i];
+					offset[i] = (max[i] + min[i]) / 2;
+				}
+				float d = Math.Max(1e-5f, dist.Length);
+				modelMatrixData = Matrix4.CreateTranslation(-offset) * Matrix4.CreateScale(2f / d);
+				#endregion
+
+				#region Indicies
+				indiceData = Enumerable.Range(0, m_Mesh.VertexList.Count).ToArray();
+				#endregion
+
+				#region Normals
+				if (m_Mesh.hasNormal)
+				{
+					normalData = new Vector3[m_Mesh.VertexList.Count];
+					for (int n = 0; n < m_Mesh.VertexList.Count; n++)
+					{
+						normalData[n] = new Vector3(m_Mesh.VertexList[n].Normal.X, m_Mesh.VertexList[n].Normal.Y, m_Mesh.VertexList[n].Normal.Z);
+					}
+				}
+				else
+				{
+					normalData = null;
+				}
+				normalMode = 1;
+				#endregion
+
+				#region Colors
+				colorData = new Vector4[m_Mesh.VertexList.Count];
+				for (int c = 0; c < m_Mesh.VertexList.Count; c++)
+				{
+					colorData[c] = new Vector4(0.5f, 0.5f, 0.5f, 1.0f);
+				}
+
+				#endregion
+				glControl1.Visible = true;
+				CreateVAO();
+				StatusStripUpdate("Using OpenGL Version: " + GL.GetString(StringName.Version) + "\n"
+								  + "'Mouse Left'=Rotate | 'Mouse Right'=Move | 'Mouse Wheel'=Zoom \n"
+								  + "'Ctrl W'=Wireframe | 'Ctrl S'=Shade | 'Ctrl N'=ReNormal ");
+			}
+			else
+			{
+				StatusStripUpdate("Unable to preview this animator");
 			}
 		}
 	}
