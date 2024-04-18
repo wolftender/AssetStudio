@@ -34,7 +34,7 @@ namespace AssetStudioGUI
 
 		// shaders
 		private int m_ModelShader;
-		private int m_uModelWorld, m_uModelView, m_uModelProj;
+		private int m_uModelWorld, m_uModelView, m_uModelProj, m_uCamPos, m_uDiffuseMap;
 
 		// buffers
 		private int m_vbPosition, m_vbUv, m_vbNormal, m_vbColor, m_vbIndex;
@@ -42,6 +42,27 @@ namespace AssetStudioGUI
 
 		// vertices num
 		private int m_numIndices;
+
+		// camera settings
+		private float m_zoom, m_pitch, m_yaw;
+
+		public float Zoom
+		{
+			get { return m_zoom; }
+			set { m_zoom = Math.Min(Math.Max(value, 1.0f), 20.0f); }
+		}
+
+		public float Pitch
+		{
+			get { return m_pitch; }
+			set { m_pitch = Math.Min(Math.Max(value, -1.56f), 1.56f); }
+		}
+
+		public float Yaw
+		{
+			get { return m_yaw; }
+			set { m_yaw = value; }
+		}
 
 		public Renderer(GLControl control)
 		{
@@ -53,6 +74,8 @@ namespace AssetStudioGUI
 			m_uModelWorld = GL.GetUniformLocation(m_ModelShader, "u_world");
 			m_uModelView = GL.GetUniformLocation(m_ModelShader, "u_view");
 			m_uModelProj = GL.GetUniformLocation(m_ModelShader, "u_projection");
+			m_uCamPos = GL.GetUniformLocation(m_ModelShader, "u_cam_position");
+			m_uDiffuseMap = GL.GetUniformLocation(m_ModelShader, "u_diffuse_map");
 
 			m_vao = 0;
 			m_vbPosition = 0;
@@ -60,6 +83,10 @@ namespace AssetStudioGUI
 			m_vbNormal = 0;
 			m_vbColor = 0;
 			m_vbIndex = 0;
+
+			m_pitch = 0.0f;
+			m_yaw = 0.0f;
+			m_zoom = 4.0f;
 
 			m_projMatrix = Matrix4.CreatePerspectiveFieldOfView((float)Math.PI / 3.0f, (float)control.Width / control.Height, 0.1f, 100.0f);
 			m_viewMatrix = Matrix4.LookAt(new Vector3(3, 3, 3), Vector3.Zero, new Vector3(0, 1, 0));
@@ -74,6 +101,16 @@ namespace AssetStudioGUI
 
 		public void Redraw()
 		{
+			// rebuild camera matrix
+			Vector4 cameraPosition = new Vector4(0.0f, 0.0f, -m_zoom, 0.0f);
+			Matrix4 transform = Matrix4.Identity;
+
+			transform = Matrix4.CreateRotationX(m_pitch) * transform;
+			transform = Matrix4.CreateRotationY(m_yaw) * transform;
+			cameraPosition = transform * cameraPosition;
+
+			m_viewMatrix = Matrix4.LookAt(cameraPosition.Xyz, Vector3.Zero, new Vector3(0.0f, 1.0f, 0.0f));
+
 			m_Control.MakeCurrent();
 			GL.ClearColor(System.Drawing.Color.Black);
 			GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
@@ -87,6 +124,9 @@ namespace AssetStudioGUI
 				GL.UseProgram(m_ModelShader);
 				GL.UniformMatrix4(m_uModelWorld, false, ref m_modelMatrix);
 				GL.UniformMatrix4(m_uModelView, false, ref m_viewMatrix);
+				GL.UniformMatrix4(m_uModelProj, false, ref m_projMatrix);
+				GL.Uniform3(m_uCamPos, cameraPosition.Xyz);
+				GL.Uniform1(m_uDiffuseMap, 0);
 				GL.UniformMatrix4(m_uModelProj, false, ref m_projMatrix);
 				GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
 				GL.DrawElements(BeginMode.Triangles, m_numIndices, DrawElementsType.UnsignedInt, 0);

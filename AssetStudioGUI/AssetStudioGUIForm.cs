@@ -53,25 +53,6 @@ namespace AssetStudioGUI
 		private bool glControlLoaded;
 		private int mdx, mdy;
 		private bool lmdown, rmdown;
-		private int pgmID, pgmColorID, pgmBlackID;
-		private int attributeVertexPosition;
-		private int attributeNormalDirection;
-		private int attributeVertexColor;
-		private int uniformModelMatrix;
-		private int uniformViewMatrix;
-		private int uniformProjMatrix;
-		private int vao;
-		private Vector3[] vertexData;
-		private Vector3[] normalData;
-		private Vector3[] normal2Data;
-		private Vector4[] colorData;
-		private Matrix4 modelMatrixData;
-		private Matrix4 viewMatrixData;
-		private Matrix4 projMatrixData;
-		private int[] indiceData;
-		private int wireFrameMode;
-		private int shadeMode;
-		private int normalMode;
 		#endregion
 
 		//asset list sorting
@@ -298,19 +279,18 @@ namespace AssetStudioGUI
 					switch (e.KeyCode)
 					{
 						case Keys.W:
-							//Toggle WireFrame
-							wireFrameMode = (wireFrameMode + 1) % 3;
+							//TODO: Toggle WireFrame
+							//wireFrameMode = (wireFrameMode + 1) % 3;
 							glControl1.Invalidate();
 							break;
 						case Keys.S:
-							//Toggle Shade
-							shadeMode = (shadeMode + 1) % 2;
+							//TODO: Toggle Shade
+							//shadeMode = (shadeMode + 1) % 2;
 							glControl1.Invalidate();
 							break;
 						case Keys.N:
-							//Normal mode
-							normalMode = (normalMode + 1) % 2;
-							CreateVAO();
+							//TODO: Normal mode
+							//normalMode = (normalMode + 1) % 2;
 							glControl1.Invalidate();
 							break;
 					}
@@ -1753,107 +1733,6 @@ namespace AssetStudioGUI
 		#endregion
 
 		#region GLControl
-		private void InitOpenTK()
-		{
-			ChangeGLSize(glControl1.Size);
-			GL.ClearColor(System.Drawing.Color.CadetBlue);
-			pgmID = GL.CreateProgram();
-			LoadShader("vs", ShaderType.VertexShader, pgmID, out int vsID);
-			LoadShader("fs", ShaderType.FragmentShader, pgmID, out int fsID);
-			GL.LinkProgram(pgmID);
-
-			pgmColorID = GL.CreateProgram();
-			LoadShader("vs", ShaderType.VertexShader, pgmColorID, out vsID);
-			LoadShader("fsColor", ShaderType.FragmentShader, pgmColorID, out fsID);
-			GL.LinkProgram(pgmColorID);
-
-			pgmBlackID = GL.CreateProgram();
-			LoadShader("vs", ShaderType.VertexShader, pgmBlackID, out vsID);
-			LoadShader("fsBlack", ShaderType.FragmentShader, pgmBlackID, out fsID);
-			GL.LinkProgram(pgmBlackID);
-
-			attributeVertexPosition = GL.GetAttribLocation(pgmID, "vertexPosition");
-			attributeNormalDirection = GL.GetAttribLocation(pgmID, "normalDirection");
-			attributeVertexColor = GL.GetAttribLocation(pgmColorID, "vertexColor");
-			uniformModelMatrix = GL.GetUniformLocation(pgmID, "modelMatrix");
-			uniformViewMatrix = GL.GetUniformLocation(pgmID, "viewMatrix");
-			uniformProjMatrix = GL.GetUniformLocation(pgmID, "projMatrix");
-		}
-
-		private static void LoadShader(string filename, ShaderType type, int program, out int address)
-		{
-			address = GL.CreateShader(type);
-			var str = (string)Properties.Resources.ResourceManager.GetObject(filename);
-			GL.ShaderSource(address, str);
-			GL.CompileShader(address);
-			GL.AttachShader(program, address);
-			GL.DeleteShader(address);
-		}
-
-		private static void CreateVBO(out int vboAddress, Vector3[] data, int address)
-		{
-			GL.GenBuffers(1, out vboAddress);
-			GL.BindBuffer(BufferTarget.ArrayBuffer, vboAddress);
-			GL.BufferData(BufferTarget.ArrayBuffer,
-									(IntPtr)(data.Length * Vector3.SizeInBytes),
-									data,
-									BufferUsageHint.StaticDraw);
-			GL.VertexAttribPointer(address, 3, VertexAttribPointerType.Float, false, 0, 0);
-			GL.EnableVertexAttribArray(address);
-		}
-
-		private static void CreateVBO(out int vboAddress, Vector4[] data, int address)
-		{
-			GL.GenBuffers(1, out vboAddress);
-			GL.BindBuffer(BufferTarget.ArrayBuffer, vboAddress);
-			GL.BufferData(BufferTarget.ArrayBuffer,
-									(IntPtr)(data.Length * Vector4.SizeInBytes),
-									data,
-									BufferUsageHint.StaticDraw);
-			GL.VertexAttribPointer(address, 4, VertexAttribPointerType.Float, false, 0, 0);
-			GL.EnableVertexAttribArray(address);
-		}
-
-		private static void CreateVBO(out int vboAddress, Matrix4 data, int address)
-		{
-			GL.GenBuffers(1, out vboAddress);
-			GL.UniformMatrix4(address, false, ref data);
-		}
-
-		private static void CreateEBO(out int address, int[] data)
-		{
-			GL.GenBuffers(1, out address);
-			GL.BindBuffer(BufferTarget.ElementArrayBuffer, address);
-			GL.BufferData(BufferTarget.ElementArrayBuffer,
-							(IntPtr)(data.Length * sizeof(int)),
-							data,
-							BufferUsageHint.StaticDraw);
-		}
-
-		private void CreateVAO()
-		{
-			GL.DeleteVertexArray(vao);
-			GL.GenVertexArrays(1, out vao);
-			GL.BindVertexArray(vao);
-			CreateVBO(out var vboPositions, vertexData, attributeVertexPosition);
-			if (normalMode == 0)
-			{
-				CreateVBO(out var vboNormals, normal2Data, attributeNormalDirection);
-			}
-			else
-			{
-				if (normalData != null)
-					CreateVBO(out var vboNormals, normalData, attributeNormalDirection);
-			}
-			CreateVBO(out var vboColors, colorData, attributeVertexColor);
-			CreateVBO(out var vboModelMatrix, modelMatrixData, uniformModelMatrix);
-			CreateVBO(out var vboViewMatrix, viewMatrixData, uniformViewMatrix);
-			CreateVBO(out var vboProjMatrix, projMatrixData, uniformProjMatrix);
-			CreateEBO(out var eboElements, indiceData);
-			GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
-			GL.BindVertexArray(0);
-		}
-
 		private void ChangeGLSize(Size size)
 		{
 			renderer.UpdateSize(size);
@@ -1889,7 +1768,7 @@ namespace AssetStudioGUI
 		{
 			if (glControl1.Visible)
 			{
-				viewMatrixData *= Matrix4.CreateScale(1 + e.Delta / 1000f);
+				renderer.Zoom = renderer.Zoom - (e.Delta * 0.001f);
 				glControl1.Invalidate();
 			}
 		}
@@ -1916,19 +1795,23 @@ namespace AssetStudioGUI
 				float dy = mdy - e.Y;
 				mdx = e.X;
 				mdy = e.Y;
+
 				if (lmdown)
 				{
 					dx *= 0.01f;
 					dy *= 0.01f;
-					viewMatrixData *= Matrix4.CreateRotationX(dy);
-					viewMatrixData *= Matrix4.CreateRotationY(dx);
+
+					renderer.Yaw -= dx;
+					renderer.Pitch += dy;
 				}
-				if (rmdown)
+
+				// TODO
+				/*if (rmdown)
 				{
 					dx *= 0.003f;
 					dy *= 0.003f;
-					viewMatrixData *= Matrix4.CreateTranslation(-dx, dy, 0);
-				}
+					//viewMatrixData *= Matrix4.CreateTranslation(-dx, dy, 0);
+				}*/
 				glControl1.Invalidate();
 			}
 		}
@@ -1975,78 +1858,7 @@ namespace AssetStudioGUI
 
 			if (m_Mesh.VertexList.Count > 0)
 			{
-				viewMatrixData = Matrix4.CreateRotationY(-(float)Math.PI / 4) * Matrix4.CreateRotationX(-(float)Math.PI / 6);
-				#region Vertices
-				if (m_Mesh.VertexList == null || m_Mesh.VertexList.Count == 0)
-				{
-					StatusStripUpdate("Mesh can't be previewed.");
-					return;
-				}
-
-				vertexData = new Vector3[m_Mesh.VertexList.Count];
-				// Calculate Bounding
-				Vector3 min = new Vector3(0.0f);
-				Vector3 max = new Vector3(0.0f);
-				for (int i = 0; i < 3; i++)
-				{
-					min[i] = m_Mesh.VertexList[i].Vertex.X;
-					max[i] = m_Mesh.VertexList[i].Vertex.X;
-				}
-				for (int v = 0; v < m_Mesh.VertexList.Count; v++)
-				{
-					for (int i = 0; i < 3; ++i)
-					{
-						min[i] = Math.Min(min[i], m_Mesh.VertexList[v].Vertex[i]);
-						max[i] = Math.Max(max[i], m_Mesh.VertexList[v].Vertex[i]);
-					}
-
-					vertexData[v] = new Vector3(m_Mesh.VertexList[v].Vertex.X, m_Mesh.VertexList[v].Vertex.Y, m_Mesh.VertexList[v].Vertex.Z);
-				}
-
-				// Calculate modelMatrix
-				Vector3 dist = Vector3.One, offset = Vector3.Zero;
-				for (int i = 0; i < 3; i++)
-				{
-					dist[i] = max[i] - min[i];
-					offset[i] = (max[i] + min[i]) / 2;
-				}
-				float d = Math.Max(1e-5f, dist.Length);
-				modelMatrixData = Matrix4.CreateTranslation(-offset) * Matrix4.CreateScale(2f / d);
-				#endregion
-
-				#region Indicies
-				indiceData = Enumerable.Range(0, m_Mesh.VertexList.Count).ToArray();
-				#endregion
-
-				#region Normals
-				if (m_Mesh.hasNormal)
-				{
-					normalData = new Vector3[m_Mesh.VertexList.Count];
-					for (int n = 0; n < m_Mesh.VertexList.Count; n++)
-					{
-						normalData[n] = new Vector3(m_Mesh.VertexList[n].Normal.X, m_Mesh.VertexList[n].Normal.Y, m_Mesh.VertexList[n].Normal.Z);
-					}
-				}
-				else
-				{
-					normalData = null;
-				}
-				normalMode = 1;
-				#endregion
-
-				#region Colors
-				colorData = new Vector4[m_Mesh.VertexList.Count];
-				for (int c = 0; c < m_Mesh.VertexList.Count; c++)
-				{
-					colorData[c] = new Vector4(0.5f, 0.5f, 0.5f, 1.0f);
-				}
-
-				#endregion
-				glControl1.Visible = true;
-				CreateVAO();
-				StatusStripUpdate("Using OpenGL Version: " + GL.GetString(StringName.Version) + "\n"
-								  + "'Mouse Left'=Rotate | 'Mouse Right'=Move | 'Mouse Wheel'=Zoom \n"
-								  + "'Ctrl W'=Wireframe | 'Ctrl S'=Shade | 'Ctrl N'=ReNormal ");
+				// TODO
 			}
 			else
 			{
