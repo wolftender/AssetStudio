@@ -26,7 +26,7 @@ out VS_OUT {
 void main() {
     vs_out.local_position = a_position;
     vs_out.local_normal = a_normal;
-    vs_out.uv = a_uv;
+    vs_out.uv = vec2(a_uv.x, 1.0 - a_uv.y);
 
     vec4 world_position = u_world * vec4(a_position.xyz, 1.0);
     vec4 world_normal = u_world * vec4(a_normal.xyz, 0.0);

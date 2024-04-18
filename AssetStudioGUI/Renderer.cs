@@ -8,6 +8,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -17,11 +18,17 @@ using Vector4 = OpenTK.Mathematics.Vector4;
 
 namespace AssetStudioGUI
 {
+	interface IRenderState
+	{
+		void SetWorldMatrix(ref Matrix4 worldMatrix);
+		void SetEnableDiffuse(bool enableDiffuse);
+	}
+
 	internal class Renderer : IDisposable
 	{
 		interface IDrawable : IDisposable
 		{
-			void Draw(int uWorldMatrix, Matrix4 worldMatrix);
+			void Draw(IRenderState state, Matrix4 worldMatrix);
 		}
 
 		class DrawableStaticMesh : IDrawable
@@ -38,9 +45,13 @@ namespace AssetStudioGUI
 				m_mesh.Dispose();
 			}
 
-			public void Draw(int uWorldMatrix, Matrix4 worldMatrix)
+			public void Draw(IRenderState state, Matrix4 worldMatrix)
 			{
-				GL.UniformMatrix4(uWorldMatrix, false, ref worldMatrix);
+				//GL.UniformMatrix4(uWorldMatrix, false, ref worldMatrix);
+
+				state.SetWorldMatrix(ref worldMatrix);
+				state.SetEnableDiffuse(false);
+
 				m_mesh.Bind();
 				m_mesh.Draw();
 			}
@@ -60,10 +71,33 @@ namespace AssetStudioGUI
 				m_mesh.Dispose();
 			}
 
-			public void Draw(int uWorldMatrix, Matrix4 worldMatrix)
+			public void Draw(IRenderState state, Matrix4 worldMatrix)
 			{
-				GL.UniformMatrix4(uWorldMatrix, false, ref worldMatrix);
-				m_mesh.Draw(uWorldMatrix, worldMatrix);
+				state.SetWorldMatrix(ref worldMatrix);
+				state.SetEnableDiffuse(false);
+
+				m_mesh.Draw(state, worldMatrix);
+			}
+		}
+
+		class RenderStateImpl : IRenderState
+		{
+			private int m_uModelWorld, m_uEnableDiffuseMap;
+
+			public RenderStateImpl(int uWorldMatrix, int uEnableDiffuse)
+			{
+				m_uModelWorld = uWorldMatrix;
+				m_uEnableDiffuseMap = uEnableDiffuse;
+			}
+
+			public void SetEnableDiffuse(bool enableDiffuse)
+			{
+				GL.Uniform1(m_uEnableDiffuseMap, enableDiffuse ? 1 : 0);
+			}
+
+			public void SetWorldMatrix(ref Matrix4 worldMatrix)
+			{
+				GL.UniformMatrix4(m_uModelWorld, false, ref worldMatrix);
 			}
 		}
 
@@ -85,7 +119,10 @@ namespace AssetStudioGUI
 
 		// shaders
 		private int m_ModelShader;
-		private int m_uModelWorld, m_uModelView, m_uModelProj, m_uCamPos, m_uDiffuseMap;
+		private int m_uModelWorld, m_uModelView, m_uModelProj, 
+			m_uCamPos, m_uDiffuseMap, m_uEnableDiffuseMap;
+
+		private RenderStateImpl m_state;
 
 		// camera settings
 		private float m_zoom, m_pitch, m_yaw;
@@ -125,6 +162,9 @@ namespace AssetStudioGUI
 			m_uModelProj = GL.GetUniformLocation(m_ModelShader, "u_projection");
 			m_uCamPos = GL.GetUniformLocation(m_ModelShader, "u_cam_position");
 			m_uDiffuseMap = GL.GetUniformLocation(m_ModelShader, "u_diffuse_map");
+			m_uEnableDiffuseMap = GL.GetUniformLocation(m_ModelShader, "u_enable_diffuse_map");
+
+			m_state = new RenderStateImpl(m_uModelWorld, m_uEnableDiffuseMap);
 
 			m_pitch = 0.0f;
 			m_yaw = 0.0f;
@@ -165,12 +205,13 @@ namespace AssetStudioGUI
 				GL.UseProgram(m_ModelShader);
 				GL.UniformMatrix4(m_uModelView, false, ref m_viewMatrix);
 				GL.UniformMatrix4(m_uModelProj, false, ref m_projMatrix);
+				GL.UniformMatrix4(m_uModelWorld, false, ref m_modelMatrix);
 				GL.Uniform3(m_uCamPos, cameraPosition.Xyz);
 				GL.Uniform1(m_uDiffuseMap, 0);
 				GL.UniformMatrix4(m_uModelProj, false, ref m_projMatrix);
 				GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
 
-				m_mesh.Draw(m_uModelWorld, m_modelMatrix);
+				m_mesh.Draw(m_state, m_modelMatrix);
 			}
 
 			// refresh

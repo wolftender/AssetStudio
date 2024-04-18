@@ -10,7 +10,7 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using static AssetStudio.BundleFile;
+
 using Vector2 = OpenTK.Mathematics.Vector2;
 using Vector3 = OpenTK.Mathematics.Vector3;
 using Vector4 = OpenTK.Mathematics.Vector4;
@@ -50,7 +50,7 @@ namespace AssetStudioGUI
 			{
 				m_diffuseId = GL.GenTexture();
 				GL.BindTexture(TextureTarget.Texture2D, m_diffuseId);
-				GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, width, height, 0, OpenTK.Graphics.OpenGL.PixelFormat.Rgb, PixelType.UnsignedByte, data);
+				GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, width, height, 0, OpenTK.Graphics.OpenGL.PixelFormat.Rgb, PixelType.UnsignedByte, data);
 				GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
 				GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
 				GL.BindTexture(TextureTarget.Texture2D, 0);
@@ -63,14 +63,19 @@ namespace AssetStudioGUI
 			private int m_vao;
 			private int m_numIndices;
 
-			public ModelMesh(Vector3[] positions, Vector2[] uvs, Vector3[] normals, Vector4[] colors, int[] indices)
+			private Material m_material;
+
+			public ModelMesh(Material material, Vector3[] positions, Vector2[] uvs, Vector3[] normals, Vector4[] colors, int[] indices)
 			{
+				m_material = material;
+
 				m_vao = GL.GenVertexArray();
 				GL.BindVertexArray(m_vao);
 
 				Renderer.CreateVBO(out m_vbPosition, positions, Renderer.SHADER_ATTRIB_POSITION);
 				Renderer.CreateVBO(out m_vbNormal, normals, Renderer.SHADER_ATTRIB_NORMAL);
 				Renderer.CreateVBO(out m_vbColor, colors, Renderer.SHADER_ATTRIB_COLOR);
+				Renderer.CreateVBO(out m_vbUv, uvs, Renderer.SHADER_ATTRIB_UV);
 				Renderer.CreateEBO(out m_vbIndex, indices);
 
 				GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
@@ -92,6 +97,11 @@ namespace AssetStudioGUI
 			public void Bind()
 			{
 				GL.BindVertexArray(m_vao);
+
+				if (m_material != null)
+				{
+					m_material.Bind();
+				}
 			}
 
 			public void Draw()
@@ -99,7 +109,7 @@ namespace AssetStudioGUI
 				GL.DrawElements(BeginMode.Triangles, m_numIndices, DrawElementsType.UnsignedInt, 0);
 			}
 
-			public static ModelMesh FromImportedMesh(ImportedMesh mesh, ImportedSubmesh submesh)
+			public static ModelMesh FromImportedMesh(Material material, ImportedMesh mesh, ImportedSubmesh submesh)
 			{
 				// TODO: what if model has no normals? (cope)
 				var numVertices = mesh.VertexList.Count;
@@ -126,6 +136,10 @@ namespace AssetStudioGUI
 					colors[i].Y = vertex.Color.G;
 					colors[i].Z = vertex.Color.B;
 					colors[i].W = vertex.Color.A;
+
+					// TODO: support other texture coordinates in display mode
+					uvs[i].X = vertex.UV[0][0];
+					uvs[i].Y = vertex.UV[0][1];
 				}
 
 				for (int f = 0; f < submesh.FaceList.Count; ++f)
@@ -140,7 +154,7 @@ namespace AssetStudioGUI
 					indices[3 * f + 2] = submesh.FaceList[f].VertexIndices[2] + submesh.BaseVertex;
 				}
 
-				return new ModelMesh(positions, uvs, normals, colors, indices);
+				return new ModelMesh(material, positions, uvs, normals, colors, indices);
 			}
 		}
 
@@ -161,21 +175,37 @@ namespace AssetStudioGUI
 				meshes = new List<ModelMesh>();
 			}
 
-			public void Draw(int uWorldMatrix, Matrix4 parentMatrix)
+			public void Draw(IRenderState state, Matrix4 parentMatrix)
 			{
 				//Matrix4 worldMatrix = transform * parentMatrix;
 				var worldMatrix = Matrix4.Identity;
 
 				foreach (var submesh in meshes)
 				{
-					GL.UniformMatrix4(uWorldMatrix, false, ref worldMatrix);
+					state.SetWorldMatrix(ref worldMatrix);
+					state.SetEnableDiffuse(true);
+
 					submesh.Bind();
 					submesh.Draw();
 				}
 
 				foreach (var child in children)
 				{
-					child.Draw(uWorldMatrix, worldMatrix);
+					child.Draw(state, worldMatrix);
+				}
+			}
+
+			public void Dispose()
+			{
+				foreach (var submesh in meshes)
+				{
+					submesh.Dispose();
+				}
+
+				meshes.Clear();
+				foreach (var child in children)
+				{
+					child.Dispose();
 				}
 			}
 		}
@@ -190,17 +220,21 @@ namespace AssetStudioGUI
 			m_rootNode = null;
 		}
 
-		public void Draw(int uWorldMatrix, Matrix4 modelMatrix)
+		public void Draw(IRenderState state, Matrix4 modelMatrix)
 		{
 			if (m_rootNode != null)
 			{
-				m_rootNode.Draw(uWorldMatrix, modelMatrix);
+				m_rootNode.Draw(state, modelMatrix);
 			}
 		}
 
 		public void Dispose()
 		{
-			throw new NotImplementedException();
+			if (m_rootNode != null)
+			{
+				m_rootNode.Dispose();
+				m_rootNode = null;
+			}
 		}
 
 		private static Vector3 AssetStudioVecToOpenTK(AssetStudio.Vector3 vector)
@@ -250,13 +284,13 @@ namespace AssetStudioGUI
 				{
 					foreach (var importedSubmesh in importedMesh.SubmeshList)
 					{
+						Material material = null;
 						var importedMaterial = ImportedHelpers.FindMaterial(importedSubmesh.Material, convert.MaterialList);
 						
 						if (importedMaterial != null)
 						{
 							var prevMaterial = model.m_materials.FindIndex(kv => kv.Key == importedMaterial.Name);
-							Material material = null;
-
+							
 							if (prevMaterial >= 0)
 							{
 								material = model.m_materials[prevMaterial].Value;
@@ -269,25 +303,46 @@ namespace AssetStudioGUI
 								var diffuseMap = ImportedHelpers.FindTexture(diffuseName, convert.TextureList);
 
 								// TODO: bad coding practice
-								Bitmap bitmap;
+								Bitmap srcBitmap;
 								using (var ms = new MemoryStream(diffuseMap.Data))
 								{
-									bitmap = new Bitmap(ms);
+									srcBitmap = new Bitmap(ms);
+								}
+
+								var bitmap = new Bitmap(srcBitmap.Width, srcBitmap.Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+
+								using (Graphics gr = Graphics.FromImage(bitmap))
+								{
+									gr.DrawImage(srcBitmap, new Rectangle(0, 0, srcBitmap.Width, srcBitmap.Height));
 								}
 
 								BitmapData bmData = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), 
-									ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+									ImageLockMode.ReadOnly, bitmap.PixelFormat);
 
 								var stride = bmData.Stride;
 								byte[] data = new byte[stride * bitmap.Height];
 								Marshal.Copy(bmData.Scan0, data, 0, data.Length);
 								bitmap.UnlockBits(bmData);
 
+								for (int i = 0; i < data.Length; i = i + 3)
+								{
+									var b = data[i + 0];
+									var g = data[i + 1];
+									var r = data[i + 2];
+
+									data[i + 0] = r;
+									data[i + 1] = g;
+									data[i + 2] = b;
+								}
+
 								material.AttachDiffuse(bitmap.Width, bitmap.Height, data);
+
+								srcBitmap.Dispose();
+								bitmap.Dispose();
 							}
 						}
 
-						node.meshes.Add(ModelMesh.FromImportedMesh(importedMesh, importedSubmesh));
+						node.meshes.Add(ModelMesh.FromImportedMesh(material, importedMesh, importedSubmesh));
 					}
 				}
 

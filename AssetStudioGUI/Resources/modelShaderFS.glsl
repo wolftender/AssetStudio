@@ -15,6 +15,7 @@ in VS_OUT {
 
 uniform sampler2D u_diffuse_map;
 uniform vec3 u_cam_position;
+uniform bool u_enable_diffuse_map;
 
 out vec4 frag_color;
 
@@ -50,5 +51,10 @@ void main() {
     float dist = length(u_cam_position - fs_in.world_position);
     vec3 phong_component = specular + diffuse / (dist * dist);
 
-    frag_color = gamma_correct(vec4(ambient + specular + diffuse, 1.0), gamma);
+    if (u_enable_diffuse_map) {
+        vec3 tex_color = texture(u_diffuse_map, fs_in.uv).xyz;
+        frag_color = gamma_correct(vec4(tex_color * (ambient + diffuse) + specular, 1.0), gamma);
+    } else {
+        frag_color = gamma_correct(vec4(ambient + specular + diffuse, 1.0), gamma);
+    }
 }
