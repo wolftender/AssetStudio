@@ -1853,16 +1853,17 @@ namespace AssetStudioGUI
 			//    ? new ModelConverter(m_Animator, Properties.Settings.Default.convertType, animationList.Select(x => (AnimationClip)x.Asset).ToArray())
 			//    : new ModelConverter(m_Animator, Properties.Settings.Default.convertType);
 
-			var convert = new ModelConverter(animator, Properties.Settings.Default.convertType);
-			var m_Mesh = convert.MeshList.FirstOrDefault();
-
-			if (m_Mesh.VertexList.Count > 0)
+			glControl1.Visible = true;
+			if (!renderer.SetModel(animator))
 			{
-				// TODO
+				glControl1.Visible = false;
+				StatusStripUpdate("Unable to preview this mesh");
 			}
 			else
 			{
-				StatusStripUpdate("Unable to preview this animator");
+				StatusStripUpdate("Using OpenGL Version: " + GL.GetString(StringName.Version) + "\n"
+									  + "'Mouse Left'=Rotate | 'Mouse Right'=Move | 'Mouse Wheel'=Zoom \n"
+									  + "'Ctrl W'=Wireframe | 'Ctrl S'=Shade | 'Ctrl N'=ReNormal ");
 			}
 		}
 	}

@@ -19,7 +19,61 @@ namespace AssetStudioGUI
 {
 	internal class Renderer : IDisposable
 	{
+		interface IDrawable : IDisposable
+		{
+			void Draw(int uWorldMatrix, Matrix4 worldMatrix);
+		}
+
+		class DrawableStaticMesh : IDrawable
+		{
+			private readonly StaticMesh m_mesh;
+
+			public DrawableStaticMesh(StaticMesh mesh)
+			{
+				m_mesh = mesh;
+			}
+
+			public void Dispose()
+			{
+				m_mesh.Dispose();
+			}
+
+			public void Draw(int uWorldMatrix, Matrix4 worldMatrix)
+			{
+				GL.UniformMatrix4(uWorldMatrix, false, ref worldMatrix);
+				m_mesh.Bind();
+				m_mesh.Draw();
+			}
+		}
+
+		class DrawableDisplayModel : IDrawable
+		{
+			private readonly DisplayModel m_mesh;
+
+			public DrawableDisplayModel(DisplayModel mesh)
+			{
+				m_mesh = mesh;
+			}
+
+			public void Dispose()
+			{
+				m_mesh.Dispose();
+			}
+
+			public void Draw(int uWorldMatrix, Matrix4 worldMatrix)
+			{
+				GL.UniformMatrix4(uWorldMatrix, false, ref worldMatrix);
+				m_mesh.Draw(uWorldMatrix, worldMatrix);
+			}
+		}
+
+		public static readonly int SHADER_ATTRIB_POSITION = 0;
+		public static readonly int SHADER_ATTRIB_NORMAL = 1;
+		public static readonly int SHADER_ATTRIB_UV = 2;
+		public static readonly int SHADER_ATTRIB_COLOR = 3;
+
 		private GLControl m_Control;
+		private Size m_Size;
 
 		// transform matrix
 		private Matrix4 m_projMatrix;
@@ -27,7 +81,7 @@ namespace AssetStudioGUI
 		private Matrix4 m_modelMatrix;
 
 		// mesh
-		private StaticMesh m_mesh;
+		private IDrawable m_mesh;
 
 		// shaders
 		private int m_ModelShader;
@@ -52,6 +106,11 @@ namespace AssetStudioGUI
 		{
 			get { return m_yaw; }
 			set { m_yaw = value; }
+		}
+
+		public Size BufferSize
+		{
+			get { return m_Size; }
 		}
 
 		public Renderer(GLControl control)
@@ -103,16 +162,15 @@ namespace AssetStudioGUI
 			// render models
 			if (m_mesh != null)
 			{
-				m_mesh.Bind();
 				GL.UseProgram(m_ModelShader);
-				GL.UniformMatrix4(m_uModelWorld, false, ref m_modelMatrix);
 				GL.UniformMatrix4(m_uModelView, false, ref m_viewMatrix);
 				GL.UniformMatrix4(m_uModelProj, false, ref m_projMatrix);
 				GL.Uniform3(m_uCamPos, cameraPosition.Xyz);
 				GL.Uniform1(m_uDiffuseMap, 0);
 				GL.UniformMatrix4(m_uModelProj, false, ref m_projMatrix);
 				GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
-				m_mesh.Draw();
+
+				m_mesh.Draw(m_uModelWorld, m_modelMatrix);
 			}
 
 			// refresh
@@ -137,15 +195,26 @@ namespace AssetStudioGUI
 				m_mesh.Dispose();
 			}
 
-			m_mesh = newMesh;
-
+			m_mesh = new DrawableStaticMesh(newMesh);
 			return true;
 		}
 
 		// sets the model from animator
-		public void SetModel(Animator animator)
+		public bool SetModel(Animator animator)
 		{
+			var newModel = DisplayModel.FromAnimator(animator);
+			if (newModel == null)
+			{
+				return false;
+			}
 
+			if (m_mesh != null)
+			{
+				m_mesh.Dispose();
+			}
+
+			m_mesh = new DrawableDisplayModel(newModel);
+			return true;
 		}
 
 		private static int LoadShader(ShaderType type, string source)
@@ -191,6 +260,53 @@ namespace AssetStudioGUI
 		{
 			DisposeBuffers();
 			GL.DeleteProgram(m_ModelShader);
+		}
+
+		// helpers
+		public static void CreateEBO(out int address, int[] data)
+		{
+			GL.GenBuffers(1, out address);
+			GL.BindBuffer(BufferTarget.ElementArrayBuffer, address);
+			GL.BufferData(BufferTarget.ElementArrayBuffer,
+							(IntPtr)(data.Length * sizeof(int)),
+							data,
+							BufferUsageHint.StaticDraw);
+		}
+
+		public static void CreateVBO(out int vboAddress, Vector2[] data, int address)
+		{
+			GL.GenBuffers(1, out vboAddress);
+			GL.BindBuffer(BufferTarget.ArrayBuffer, vboAddress);
+			GL.BufferData(BufferTarget.ArrayBuffer,
+									(IntPtr)(data.Length * Vector2.SizeInBytes),
+									data,
+									BufferUsageHint.StaticDraw);
+			GL.VertexAttribPointer(address, 2, VertexAttribPointerType.Float, false, 0, 0);
+			GL.EnableVertexAttribArray(address);
+		}
+
+		public static void CreateVBO(out int vboAddress, Vector3[] data, int address)
+		{
+			GL.GenBuffers(1, out vboAddress);
+			GL.BindBuffer(BufferTarget.ArrayBuffer, vboAddress);
+			GL.BufferData(BufferTarget.ArrayBuffer,
+									(IntPtr)(data.Length * Vector3.SizeInBytes),
+									data,
+									BufferUsageHint.StaticDraw);
+			GL.VertexAttribPointer(address, 3, VertexAttribPointerType.Float, false, 0, 0);
+			GL.EnableVertexAttribArray(address);
+		}
+
+		public static void CreateVBO(out int vboAddress, Vector4[] data, int address)
+		{
+			GL.GenBuffers(1, out vboAddress);
+			GL.BindBuffer(BufferTarget.ArrayBuffer, vboAddress);
+			GL.BufferData(BufferTarget.ArrayBuffer,
+									(IntPtr)(data.Length * Vector4.SizeInBytes),
+									data,
+									BufferUsageHint.StaticDraw);
+			GL.VertexAttribPointer(address, 4, VertexAttribPointerType.Float, false, 0, 0);
+			GL.EnableVertexAttribArray(address);
 		}
 	}
 }

@@ -12,11 +12,6 @@ namespace AssetStudioGUI
 {
 	internal class StaticMesh : IDisposable
 	{
-		private static readonly int SHADER_ATTRIB_POSITION = 0;
-		private static readonly int SHADER_ATTRIB_NORMAL = 1;
-		private static readonly int SHADER_ATTRIB_UV = 2;
-		private static readonly int SHADER_ATTRIB_COLOR = 3;
-
 		// buffers
 		private int m_vbPosition, m_vbUv, m_vbNormal, m_vbColor, m_vbIndex;
 		private int m_vao;
@@ -28,10 +23,10 @@ namespace AssetStudioGUI
 			m_vao = GL.GenVertexArray();
 			GL.BindVertexArray(m_vao);
 
-			CreateVBO(out m_vbPosition, positions, SHADER_ATTRIB_POSITION);
-			CreateVBO(out m_vbNormal, normals, SHADER_ATTRIB_NORMAL);
-			CreateVBO(out m_vbColor, colors, SHADER_ATTRIB_COLOR);
-			CreateEBO(out m_vbIndex, indices);
+			Renderer.CreateVBO(out m_vbPosition, positions, Renderer.SHADER_ATTRIB_POSITION);
+			Renderer.CreateVBO(out m_vbNormal, normals, Renderer.SHADER_ATTRIB_NORMAL);
+			Renderer.CreateVBO(out m_vbColor, colors, Renderer.SHADER_ATTRIB_COLOR);
+			Renderer.CreateEBO(out m_vbIndex, indices);
 
 			GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
 			GL.BindVertexArray(0);
@@ -86,53 +81,6 @@ namespace AssetStudioGUI
 		public void Draw()
 		{
 			GL.DrawElements(BeginMode.Triangles, m_numIndices, DrawElementsType.UnsignedInt, 0);
-		}
-
-		// helpers
-		private static void CreateEBO(out int address, int[] data)
-		{
-			GL.GenBuffers(1, out address);
-			GL.BindBuffer(BufferTarget.ElementArrayBuffer, address);
-			GL.BufferData(BufferTarget.ElementArrayBuffer,
-							(IntPtr)(data.Length * sizeof(int)),
-							data,
-							BufferUsageHint.StaticDraw);
-		}
-
-		private static void CreateVBO(out int vboAddress, Vector2[] data, int address)
-		{
-			GL.GenBuffers(1, out vboAddress);
-			GL.BindBuffer(BufferTarget.ArrayBuffer, vboAddress);
-			GL.BufferData(BufferTarget.ArrayBuffer,
-									(IntPtr)(data.Length * Vector2.SizeInBytes),
-									data,
-									BufferUsageHint.StaticDraw);
-			GL.VertexAttribPointer(address, 2, VertexAttribPointerType.Float, false, 0, 0);
-			GL.EnableVertexAttribArray(address);
-		}
-
-		private static void CreateVBO(out int vboAddress, Vector3[] data, int address)
-		{
-			GL.GenBuffers(1, out vboAddress);
-			GL.BindBuffer(BufferTarget.ArrayBuffer, vboAddress);
-			GL.BufferData(BufferTarget.ArrayBuffer,
-									(IntPtr)(data.Length * Vector3.SizeInBytes),
-									data,
-									BufferUsageHint.StaticDraw);
-			GL.VertexAttribPointer(address, 3, VertexAttribPointerType.Float, false, 0, 0);
-			GL.EnableVertexAttribArray(address);
-		}
-
-		private static void CreateVBO(out int vboAddress, Vector4[] data, int address)
-		{
-			GL.GenBuffers(1, out vboAddress);
-			GL.BindBuffer(BufferTarget.ArrayBuffer, vboAddress);
-			GL.BufferData(BufferTarget.ArrayBuffer,
-									(IntPtr)(data.Length * Vector4.SizeInBytes),
-									data,
-									BufferUsageHint.StaticDraw);
-			GL.VertexAttribPointer(address, 4, VertexAttribPointerType.Float, false, 0, 0);
-			GL.EnableVertexAttribArray(address);
 		}
 
 		public static StaticMesh FromMesh(Mesh mesh, out Matrix4 worldMatrix)
