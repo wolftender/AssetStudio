@@ -14,11 +14,175 @@ using System.Runtime.InteropServices;
 using Vector2 = OpenTK.Mathematics.Vector2;
 using Vector3 = OpenTK.Mathematics.Vector3;
 using Vector4 = OpenTK.Mathematics.Vector4;
+using Quaternion = OpenTK.Mathematics.Quaternion;
 
 namespace AssetStudioGUI
 {
 	internal class DisplayModel : IDisposable
 	{
+		public class KeyframedAnimation
+		{
+			private struct TranslationKeyframe
+			{
+				public float time;
+				public Vector3 translation;
+
+				public TranslationKeyframe(float t, Vector3 v)
+				{
+					time = t;
+					translation = v;
+				}
+			}
+
+			private struct RotationKeyframe
+			{
+				public float time;
+				public Quaternion rotation;
+
+				public RotationKeyframe(float t, Vector3 v)
+				{
+					time = t;
+					rotation = 
+						Quaternion.FromAxisAngle(new Vector3(0, 0, 1), v.Z) *
+						Quaternion.FromAxisAngle(new Vector3(0, 1, 0), v.Y) *
+						Quaternion.FromAxisAngle(new Vector3(1, 0, 0), v.X);
+				}
+			}
+
+			private struct ScaleKeyframe
+			{
+				public float time;
+				public Vector3 scale;
+
+				public ScaleKeyframe(float t, Vector3 v)
+				{
+					time = t;
+					scale = v;
+				}
+			}
+
+			private struct AnimationChannel
+			{
+				public int refNodeId;
+
+				public List<TranslationKeyframe> translations;
+				public List<RotationKeyframe> rotations;
+				public List<ScaleKeyframe> scales;
+
+				public AnimationChannel(int refNodeId)
+				{
+					this.refNodeId = refNodeId;
+					translations = new List<TranslationKeyframe>();
+					rotations = new List<RotationKeyframe>();
+					scales = new List<ScaleKeyframe>();
+				}
+			}
+
+			private List<AnimationChannel> m_channels;
+
+			private KeyframedAnimation()
+			{
+				m_channels = new List<AnimationChannel>();
+			}
+
+			public void ApplyTo(IModelPose pose, float t)
+			{
+				foreach (var channel in m_channels)
+				{
+					Vector3 translation = Vector3.Zero, scale = Vector3.Zero;
+					Quaternion rotation = Quaternion.FromEulerAngles(Vector3.Zero);
+
+					var numTranslations = channel.translations.Count;
+					var numRotations = channel.rotations.Count;
+					var numScalings = channel.scales.Count;
+
+					for (var i = 0; i < numTranslations; i++)
+					{
+						var current = channel.translations[i];
+						var next = channel.translations[(i + 1) % numTranslations];
+
+						if (current.time <= t &&  next.time >= t)
+						{
+							float param = t / (next.time - current.time);
+							translation = Vector3.Lerp(current.translation, next.translation, param);
+						}
+					}
+
+					for (var i = 0; i < numRotations; i++)
+					{
+						var current = channel.rotations[i];
+						var next = channel.rotations[(i + 1) % numRotations];
+
+						if (current.time <= t && next.time >= t)
+						{
+							float param = t / (next.time - current.time);
+							rotation = Quaternion.Slerp(current.rotation, next.rotation, param);
+						}
+					}
+
+					for (var i = 0; i < numScalings; i++)
+					{
+						var current = channel.scales[i];
+						var next = channel.scales[(i + 1) % numScalings];
+
+						if (current.time <= t && next.time >= t)
+						{
+							float param = t / (next.time - current.time);
+							scale = Vector3.Lerp(current.scale, next.scale, param);
+						}
+					}
+
+					Matrix4 transform =
+						Matrix4.CreateScale(scale) *
+						Matrix4.CreateFromQuaternion(rotation) *
+						Matrix4.CreateTranslation(translation);
+
+					pose.SetTransform(channel.refNodeId, transform);
+				}
+			}
+
+			public static KeyframedAnimation FromImportedAnimation(IModelPose pose, ImportedKeyframedAnimation animation)
+			{
+				KeyframedAnimation result = new KeyframedAnimation();
+
+				foreach (var track in animation.TrackList)
+				{
+					var refNodeId = pose.GetIdFromPath(track.Path);
+					if (refNodeId < 0)
+					{
+						throw new Exception($"animation does not match pose, missing path {track.Path}");
+					}
+
+					Debug.WriteLine($"animation references node {track.Path} with id {refNodeId}");
+
+					AnimationChannel channel = new AnimationChannel(refNodeId);
+					
+					foreach (var keyframe in track.Translations)
+					{
+						channel.translations.Add(new TranslationKeyframe(keyframe.time, AssetStudioVecToOpenTK(keyframe.value)));
+					}
+
+					foreach (var keyframe in track.Rotations)
+					{
+						channel.rotations.Add(new RotationKeyframe(keyframe.time, AssetStudioVecToOpenTK(keyframe.value)));
+					} 
+
+					foreach (var keyframe in track.Scalings)
+					{
+						channel.scales.Add(new ScaleKeyframe(keyframe.time, AssetStudioVecToOpenTK(keyframe.value)));
+					}
+
+					result.m_channels.Add(channel);
+
+					channel.translations.Sort((a, b) => a.time.CompareTo(b.time));
+					channel.rotations.Sort((a, b) => a.time.CompareTo(b.time));
+					channel.scales.Sort((a, b) => a.time.CompareTo(b.time));
+				}
+
+				return result;
+			}
+		}
+
 		class Material : IDisposable
 		{
 			private int m_diffuseId;
@@ -76,6 +240,11 @@ namespace AssetStudioGUI
 
 			private int[] m_parentById;
 			private int m_numNodes;
+
+			public int NumNodes
+			{
+				get { return m_numNodes; }
+			}
 
 			public ModelPose()
 			{
@@ -140,6 +309,11 @@ namespace AssetStudioGUI
 
 			public int GetIdFromPath(string path)
 			{
+				if (path == null)
+				{
+					return 0;
+				}
+
 				if (m_boneIdByPath.ContainsKey(path))
 				{
 					return m_boneIdByPath[path];
@@ -223,6 +397,7 @@ namespace AssetStudioGUI
 			private int m_numIndices;
 
 			private Material m_material;
+			private Matrix4[] m_offsets;
 
 			public ModelMesh(
 				Material material, Vector3[] positions, 
@@ -276,6 +451,20 @@ namespace AssetStudioGUI
 				GL.DrawElements(BeginMode.Triangles, m_numIndices, DrawElementsType.UnsignedInt, 0);
 			}
 
+			public void Draw(IRenderState state, Matrix4[] pose)
+			{
+				var boneMatrices = new Matrix4[pose.Length];
+
+				for (int i = 0; i < boneMatrices.Length; ++i)
+				{
+					boneMatrices[i] = pose[i] * m_offsets[i];
+				}
+
+				state.SetEnableSkinning(true);
+				state.SetPose(boneMatrices);
+				Draw();
+			}
+
 			public static ModelMesh FromImportedMesh(ModelPose pose, Material material, ImportedMesh mesh, ImportedSubmesh submesh)
 			{
 				// TODO: what if model has no normals? (cope)
@@ -293,6 +482,8 @@ namespace AssetStudioGUI
 				// relation for bones is a bit complicated in this place
 				// a mesh has its own list of bones, but those are merely references to nodes in model hierarchy
 				// since we want only one uniform buffer per model we need to translate "mesh" bone id to "model" bone id
+				var boneOffsets = new Matrix4[pose.NumNodes];
+
 				var nodeByBone = new int[mesh.BoneList.Count];
 				for (int i = 0; i < nodeByBone.Length; i++)
 				{
@@ -304,6 +495,17 @@ namespace AssetStudioGUI
 					}
 
 					nodeByBone[i] = refNodeId;
+
+					// copy offset matrix
+					for (int c = 0; c < 4; ++c)
+					{
+						for (int r = 0; r < 4; ++r)
+						{
+							boneOffsets[refNodeId][c,r] = mesh.BoneList[i].Matrix[c,r];
+						}
+					}
+
+					//boneOffsets[refNodeId].Invert();
 				}
 
 				// fill out buffers that are going to be uploaded to the gpu
@@ -360,7 +562,10 @@ namespace AssetStudioGUI
 					indices[3 * f + 2] = submesh.FaceList[f].VertexIndices[2] + submesh.BaseVertex;
 				}
 
-				return new ModelMesh(material, positions, uvs, normals, colors, boneweights, boneidx, indices);
+				var result = new ModelMesh(material, positions, uvs, normals, colors, boneweights, boneidx, indices);
+				result.m_offsets = boneOffsets;
+
+				return result;
 			}
 		}
 
@@ -392,8 +597,7 @@ namespace AssetStudioGUI
 
 			public void Draw(IRenderState state, Matrix4 parentMatrix)
 			{
-				//Matrix4 worldMatrix = transform * parentMatrix;
-				var worldMatrix = Matrix4.Identity;
+				Matrix4 worldMatrix = transform * parentMatrix;
 
 				foreach (var submesh in meshes)
 				{
@@ -407,6 +611,25 @@ namespace AssetStudioGUI
 				foreach (var child in children)
 				{
 					child.Draw(state, worldMatrix);
+				}
+			}
+
+			public void Draw(IRenderState state, Matrix4[] currentPose, Matrix4 parentMatrix)
+			{
+				Matrix4 worldMatrix = transform * parentMatrix;
+
+				foreach (var submesh in meshes)
+				{
+					state.SetWorldMatrix(ref worldMatrix);
+					state.SetEnableDiffuse(true);
+
+					submesh.Bind();
+					submesh.Draw(state, currentPose);
+				}
+
+				foreach (var child in children)
+				{
+					child.Draw(state, currentPose, worldMatrix);
 				}
 			}
 
@@ -444,6 +667,15 @@ namespace AssetStudioGUI
 			}
 		}
 
+		public void Draw(IRenderState state, IModelPose pose, Matrix4 modelMatrix)
+		{
+			if (m_rootNode != null)
+			{
+				var currentPose = pose.GetCurrentPose();
+				m_rootNode.Draw(state, currentPose, modelMatrix);
+			}
+		}
+
 		public void Dispose()
 		{
 			if (m_rootNode != null)
@@ -463,10 +695,25 @@ namespace AssetStudioGUI
 			return new Vector3(vector.X, vector.Y, vector.Z);
 		}
 
+		public static DisplayModel FromAnimatorAndClip(Animator animator, AnimationClip clip, out KeyframedAnimation animation)
+		{
+			var animClips = new AnimationClip[] { clip };
+			var convert = new ModelConverter(animator, Properties.Settings.Default.convertType, animClips);
+
+			var model = FromConverter(convert);
+			animation = KeyframedAnimation.FromImportedAnimation(model.CreatePose(), convert.AnimationList.First());
+
+			return model;
+		}
+
 		public static DisplayModel FromAnimator(Animator animator)
 		{
 			var convert = new ModelConverter(animator, Properties.Settings.Default.convertType);
+			return FromConverter(convert);
+		}
 
+		private static DisplayModel FromConverter(ModelConverter convert)
+		{
 			Stack<ImportedFrame> nodeStack = new Stack<ImportedFrame>();
 			Stack<ModelNode> parentStack = new Stack<ModelNode>();
 
@@ -507,12 +754,12 @@ namespace AssetStudioGUI
 				var rotation = AssetStudioVecToOpenTK(frame.LocalRotation);
 				var scale = AssetStudioVecToOpenTK(frame.LocalScale);
 
-				var localMatrix = 
-					Matrix4.CreateTranslation(translation) * 
-					Matrix4.CreateRotationX(rotation.X) * 
-					Matrix4.CreateRotationY(rotation.Y) * 
-					Matrix4.CreateRotationZ(rotation.Z) * 
-					Matrix4.CreateScale(scale);
+				var localMatrix =
+					Matrix4.CreateScale(scale) *
+					Matrix4.CreateRotationZ(rotation.Z) *
+					Matrix4.CreateRotationY(rotation.Y) *
+					Matrix4.CreateRotationX(rotation.X) *
+					Matrix4.CreateTranslation(translation);
 				node.transform = localMatrix;
 
 				// add mesh to load list if exists

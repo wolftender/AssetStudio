@@ -72,6 +72,8 @@ namespace AssetStudioGUI
 
 		private GUILogger logger;
 
+		private System.Windows.Forms.Timer animTimer;
+
 		// graphics
 		private Renderer renderer;
 
@@ -719,7 +721,8 @@ namespace AssetStudioGUI
 						PreviewAnimator(m_Animator);
 						StatusStripUpdate("Can be exported to FBX file.");
 						break;
-					case AnimationClip _:
+					case AnimationClip animationClip:
+						TryPreviewAnimationClip(animationClip);
 						StatusStripUpdate("Can be exported with Animator or Objects");
 						break;
 					default:
@@ -1744,6 +1747,11 @@ namespace AssetStudioGUI
 
 			renderer = new Renderer(glControl1);
 			glControlLoaded = true;
+
+			animTimer = new System.Windows.Forms.Timer();
+			animTimer.Interval = 30;
+			animTimer.Tick += OnTimerUpdate;
+			animTimer.Start();
 		}
 
 		private void glControl1_Paint(object sender, PaintEventArgs e)
@@ -1875,6 +1883,57 @@ namespace AssetStudioGUI
 				StatusStripUpdate("Using OpenGL Version: " + GL.GetString(StringName.Version) + "\n"
 									  + "'Mouse Left'=Rotate | 'Mouse Right'=Move | 'Mouse Wheel'=Zoom \n"
 									  + "'Ctrl W'=Wireframe | 'Ctrl S'=Shade | 'Ctrl N'=ReNormal ");
+			}
+		}
+
+		private void TryPreviewAnimationClip(AnimationClip clip)
+		{
+			AssetItem animator = null;
+			List<AssetItem> animationList = new List<AssetItem>();
+			var selectedAssets = GetSelectedAssets();
+			foreach (var assetPreloadData in selectedAssets)
+			{
+				if (assetPreloadData.Type == ClassIDType.Animator)
+				{
+					animator = assetPreloadData;
+				}
+				else if (assetPreloadData.Type == ClassIDType.AnimationClip)
+				{
+					animationList.Add(assetPreloadData);
+				}
+			}
+
+			if (animator == null)
+			{
+				return;
+			}
+
+			var animations = animationList.Select(x => (AnimationClip)x.Asset).ToArray();
+			var animatorAsset = (Animator)animator.Asset;
+
+			glControl1.Visible = true;
+			if (!renderer.SetModelAndClip(animatorAsset, animations[animations.Length - 1]))
+			{
+				glControl1.Visible = false;
+				StatusStripUpdate("Unable to preview this mesh");
+			}
+			else
+			{
+				StatusStripUpdate("Using OpenGL Version: " + GL.GetString(StringName.Version) + "\n"
+									  + "'Mouse Left'=Rotate | 'Mouse Right'=Move | 'Mouse Wheel'=Zoom \n"
+									  + "'Ctrl W'=Wireframe | 'Ctrl S'=Shade | 'Ctrl N'=ReNormal ");
+			}
+		}
+
+		private void OnTimerUpdate(object sender, EventArgs e)
+		{
+			if (renderer != null)
+			{
+				if (renderer.IsAnimatorLoaded)
+				{
+					renderer.Update(0.01f);
+					renderer.Redraw();
+				}
 			}
 		}
 	}

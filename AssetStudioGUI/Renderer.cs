@@ -68,12 +68,17 @@ namespace AssetStudioGUI
 		{
 			private readonly DisplayModel m_mesh;
 			private readonly DisplayModel.IModelPose m_pose;
+			private readonly DisplayModel.KeyframedAnimation m_animation;
+			private float m_time;
 
-			public DrawableDisplayModel(DisplayModel mesh)
+			public DrawableDisplayModel(DisplayModel mesh, DisplayModel.KeyframedAnimation animation = null)
 			{
 				m_mesh = mesh;
 				m_pose = mesh.CreatePose();
 				m_pose.SetBindPose();
+
+				m_animation = animation;
+				m_time = 0.0f;
 			}
 
 			public void Dispose()
@@ -81,14 +86,29 @@ namespace AssetStudioGUI
 				m_mesh.Dispose();
 			}
 
+			public void AddTime(float time)
+			{
+				m_time += time;
+			}
+
 			public void Draw(IRenderState state, Matrix4 worldMatrix)
 			{
-				state.SetWorldMatrix(ref worldMatrix);
-				state.SetEnableDiffuse(false);
-				state.SetEnableSkinning(true);
-				state.SetPose(m_pose.GetCurrentPose());
+				if (m_animation != null)
+				{
+					m_animation.ApplyTo(m_pose, m_time);
 
-				m_mesh.Draw(state, worldMatrix);
+					state.SetWorldMatrix(ref worldMatrix);
+					state.SetEnableDiffuse(false);
+
+					m_mesh.Draw(state, m_pose, worldMatrix);
+				} else
+				{
+					state.SetWorldMatrix(ref worldMatrix);
+					state.SetEnableDiffuse(false);
+					state.SetEnableSkinning(false);
+
+					m_mesh.Draw(state, worldMatrix);
+				}
 			}
 		}
 
@@ -260,6 +280,11 @@ namespace AssetStudioGUI
 			set { m_center = value; }
 		}
 
+		public bool IsAnimatorLoaded
+		{
+			get { return (m_mesh != null && m_mesh is DrawableDisplayModel); }
+		}
+
 		public Renderer(GLControl control)
 		{
 			m_Control = control;
@@ -276,6 +301,7 @@ namespace AssetStudioGUI
 
 			m_projMatrix = Matrix4.CreatePerspectiveFieldOfView((float)Math.PI / 3.0f, (float)control.Width / control.Height, 0.1f, 100.0f);
 			m_viewMatrix = Matrix4.LookAt(new Vector3(3, 3, 3), Vector3.Zero, new Vector3(0, 1, 0));
+			m_modelMatrix = Matrix4.Identity;
 		}
 
 		public void UpdateSize(Size newSize)
@@ -283,6 +309,14 @@ namespace AssetStudioGUI
 			m_projMatrix = Matrix4.CreatePerspectiveFieldOfView((float)Math.PI / 3.0f, (float)newSize.Width / newSize.Height, 0.1f, 100.0f);
 			GL.Viewport(0, 0, newSize.Width, newSize.Height);
 			m_Size = newSize;
+		}
+
+		public void Update(float dt)
+		{
+			if (m_mesh is DrawableDisplayModel)
+			{
+				(m_mesh as DrawableDisplayModel).AddTime(dt);
+			}
 		}
 
 		public void Redraw()
@@ -364,6 +398,24 @@ namespace AssetStudioGUI
 			}
 
 			m_mesh = new DrawableDisplayModel(newModel);
+			return true;
+		}
+
+		public bool SetModelAndClip(Animator animator, AnimationClip clip)
+		{
+			m_center = Vector3.Zero;
+			var newModel = DisplayModel.FromAnimatorAndClip(animator, clip, out var animation);
+			if (newModel == null)
+			{
+				return false;
+			}
+
+			if (m_mesh != null)
+			{
+				m_mesh.Dispose();
+			}
+
+			m_mesh = new DrawableDisplayModel(newModel, animation);
 			return true;
 		}
 
