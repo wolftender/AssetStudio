@@ -73,6 +73,7 @@ namespace AssetStudioGUI
 			{
 				m_mesh = mesh;
 				m_pose = mesh.CreatePose();
+				m_pose.SetBindPose();
 			}
 
 			public void Dispose()

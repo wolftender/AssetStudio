@@ -65,6 +65,7 @@ namespace AssetStudioGUI
 			int GetIdFromPath(string path);
 			int GetParent(int nodeId);
 
+			Matrix4 GetTransform(int nodeId);
 			Matrix4[] GetCurrentPose();
 		}
 
@@ -83,6 +84,8 @@ namespace AssetStudioGUI
 
 				m_transformById = new Matrix4[Renderer.SHADER_MAX_BONES];
 				m_parentById = new int[Renderer.SHADER_MAX_BONES];
+
+				SetBindPose();
 			}
 
 			public int InsertNode(int parent, string path)
@@ -129,7 +132,7 @@ namespace AssetStudioGUI
 
 			public void SetTransform(int nodeId, Matrix4 transform)
 			{
-				if (nodeId > 0 && nodeId <  m_numNodes)
+				if (nodeId > 0 && nodeId < m_numNodes)
 				{
 					m_transformById[nodeId] = transform;
 				}
@@ -157,7 +160,59 @@ namespace AssetStudioGUI
 
 			public Matrix4[] GetCurrentPose()
 			{
-				return m_transformById;
+				// recalculate current pose
+				Stack<int> nodeStack = new Stack<int>();
+
+				Matrix4[] pose = new Matrix4[m_numNodes];
+				bool[] calculated = new bool[m_numNodes];
+
+				for (int i = 0; i < m_numNodes; ++i)
+				{
+					calculated[i] = false;
+					nodeStack.Push(i);
+				}
+
+				while (nodeStack.Count > 0)
+				{
+					int nodeId = nodeStack.Pop();
+
+					if (calculated[nodeId])
+					{
+						continue;
+					}
+
+					var parent = GetParent(nodeId);
+					if (parent < 0)
+					{
+						pose[nodeId] = m_transformById[nodeId];
+						calculated[nodeId] = true;
+					} 
+					else
+					{
+						if (calculated[parent])
+						{
+							pose[nodeId] = pose[parent] * m_transformById[nodeId];
+							calculated[nodeId] = true;
+						} 
+						else
+						{
+							nodeStack.Push(nodeId);
+							nodeStack.Push(parent);
+						}
+					}
+				}
+
+				return pose;
+			}
+
+			public Matrix4 GetTransform(int nodeId)
+			{
+				if (nodeId > 0 && nodeId < m_numNodes)
+				{
+					return m_transformById[nodeId];
+				}
+
+				return Matrix4.Identity;
 			}
 		}
 
