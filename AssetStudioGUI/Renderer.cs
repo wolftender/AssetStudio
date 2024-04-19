@@ -203,6 +203,8 @@ namespace AssetStudioGUI
 		private Matrix4 m_viewMatrix;
 		private Matrix4 m_modelMatrix;
 
+		private Vector3 m_center;
+
 		// mesh
 		private IDrawable m_mesh;
 
@@ -236,6 +238,27 @@ namespace AssetStudioGUI
 			get { return m_Size; }
 		}
 
+		public Matrix4 ProjMatrix
+		{
+			get { return m_projMatrix; }
+		}
+
+		public Matrix4 ViewMatrix
+		{
+			get { return m_viewMatrix; }
+		}
+
+		public Matrix4 ModelMatrix
+		{
+			get { return m_modelMatrix; }
+		}
+
+		public Vector3 Center
+		{
+			get { return m_center; }
+			set { m_center = value; }
+		}
+
 		public Renderer(GLControl control)
 		{
 			m_Control = control;
@@ -248,6 +271,7 @@ namespace AssetStudioGUI
 			m_pitch = 0.0f;
 			m_yaw = 0.0f;
 			m_zoom = 4.0f;
+			m_center = Vector3.Zero;
 
 			m_projMatrix = Matrix4.CreatePerspectiveFieldOfView((float)Math.PI / 3.0f, (float)control.Width / control.Height, 0.1f, 100.0f);
 			m_viewMatrix = Matrix4.LookAt(new Vector3(3, 3, 3), Vector3.Zero, new Vector3(0, 1, 0));
@@ -270,7 +294,7 @@ namespace AssetStudioGUI
 			transform = Matrix4.CreateRotationY(m_yaw) * transform;
 			cameraPosition = transform * cameraPosition;
 
-			m_viewMatrix = Matrix4.LookAt(cameraPosition.Xyz, Vector3.Zero, new Vector3(0.0f, 1.0f, 0.0f));
+			m_viewMatrix = Matrix4.LookAt(m_center + cameraPosition.Xyz, m_center, new Vector3(0.0f, 1.0f, 0.0f));
 
 			m_Control.MakeCurrent();
 			GL.ClearColor(System.Drawing.Color.Black);
@@ -306,6 +330,7 @@ namespace AssetStudioGUI
 		// sets the model from mesh
 		public bool SetModel(Mesh mesh)
 		{
+			m_center = Vector3.Zero;
 			var newMesh = StaticMesh.FromMesh(mesh, out m_modelMatrix);
 			
 			if (newMesh == null)
@@ -325,6 +350,7 @@ namespace AssetStudioGUI
 		// sets the model from animator
 		public bool SetModel(Animator animator)
 		{
+			m_center = Vector3.Zero;
 			var newModel = DisplayModel.FromAnimator(animator);
 			if (newModel == null)
 			{

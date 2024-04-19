@@ -1805,13 +1805,24 @@ namespace AssetStudioGUI
 					renderer.Pitch += dy;
 				}
 
-				// TODO
-				/*if (rmdown)
+				if (rmdown)
 				{
-					dx *= 0.003f;
-					dy *= 0.003f;
-					//viewMatrixData *= Matrix4.CreateTranslation(-dx, dy, 0);
-				}*/
+					var viewInv = renderer.ViewMatrix;
+					var Tinv = viewInv;
+
+					Vector4 e1 = new Vector4(1, 0, 0, 0);
+					Vector4 e2 = new Vector4(0, 1, 0, 0);
+
+					e1 = Tinv * e1;
+					e2 = Tinv * e2;
+
+					var center = renderer.Center;
+					center += e1.Xyz * dx * 0.003f;
+					center -= e2.Xyz * dy * 0.003f;
+
+					renderer.Center = center;
+				}
+
 				glControl1.Invalidate();
 			}
 		}
