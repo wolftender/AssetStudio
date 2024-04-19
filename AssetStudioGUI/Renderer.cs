@@ -8,7 +8,6 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -20,8 +19,15 @@ namespace AssetStudioGUI
 {
 	interface IRenderState
 	{
-		void SetWorldMatrix(ref Matrix4 worldMatrix);
+		void SetPose(Matrix4[] pose);
+		void ResetPose();
+		void SetDiffuseMap(int texId);
 		void SetEnableDiffuse(bool enableDiffuse);
+		void SetWorldMatrix(ref Matrix4 worldMatrix);
+		void SetViewMatrix(ref Matrix4 viewMatrix);
+		void SetProjMatrix(ref Matrix4 projMatrix);
+		void SetCameraPosition(ref Vector3 position);
+		void SetEnableSkinning(bool enableSkinning);
 	}
 
 	internal class Renderer : IDisposable
@@ -51,6 +57,7 @@ namespace AssetStudioGUI
 
 				state.SetWorldMatrix(ref worldMatrix);
 				state.SetEnableDiffuse(false);
+				state.SetEnableSkinning(false);
 
 				m_mesh.Bind();
 				m_mesh.Draw();
@@ -75,19 +82,69 @@ namespace AssetStudioGUI
 			{
 				state.SetWorldMatrix(ref worldMatrix);
 				state.SetEnableDiffuse(false);
+				state.SetEnableSkinning(true);
+				state.ResetPose();
 
 				m_mesh.Draw(state, worldMatrix);
 			}
 		}
 
-		class RenderStateImpl : IRenderState
+		class RenderStateImpl : IRenderState, IDisposable
 		{
-			private int m_uModelWorld, m_uEnableDiffuseMap;
+			public static readonly int UBO_BINDING_BONES = 0;
 
-			public RenderStateImpl(int uWorldMatrix, int uEnableDiffuse)
+			private int m_uModelWorld, m_uModelView, m_uModelProj,
+			m_uCamPos, m_uDiffuseMap, m_uEnableDiffuseMap, m_uEnableSkinning;
+
+			private int m_boneBuffer;
+
+			public RenderStateImpl(int modelShader)
 			{
-				m_uModelWorld = uWorldMatrix;
-				m_uEnableDiffuseMap = uEnableDiffuse;
+				m_uModelWorld = GL.GetUniformLocation(modelShader, "u_world");
+				m_uModelView = GL.GetUniformLocation(modelShader, "u_view");
+				m_uModelProj = GL.GetUniformLocation(modelShader, "u_projection");
+				m_uCamPos = GL.GetUniformLocation(modelShader, "u_cam_position");
+				m_uDiffuseMap = GL.GetUniformLocation(modelShader, "u_diffuse_map");
+				m_uEnableDiffuseMap = GL.GetUniformLocation(modelShader, "u_enable_diffuse_map");
+				m_uEnableSkinning = GL.GetUniformLocation(modelShader, "u_enable_skinning");
+
+				// setup bone buffer
+				int boneBufferSize = 16 * 4 * SHADER_MAX_BONES;
+
+				m_boneBuffer = GL.GenBuffer();
+				GL.BindBuffer(BufferTarget.UniformBuffer, m_boneBuffer);
+				GL.BufferData(BufferTarget.UniformBuffer, boneBufferSize, IntPtr.Zero, BufferUsageHint.DynamicDraw);
+
+				var bonesIndex = GL.GetUniformBlockIndex(modelShader, "BoneData");
+				GL.UniformBlockBinding(modelShader, bonesIndex, UBO_BINDING_BONES);
+				GL.BindBufferBase(BufferRangeTarget.UniformBuffer, UBO_BINDING_BONES, m_boneBuffer);
+
+				GL.BindBuffer(BufferTarget.UniformBuffer, 0);
+			}
+
+			public void SetPose(Matrix4[] pose)
+			{
+				int numMatrices = Math.Min(pose.Length, SHADER_MAX_BONES);
+
+				GL.BindBuffer(BufferTarget.UniformBuffer, m_boneBuffer);
+				GL.BufferSubData(BufferTarget.UniformBuffer, IntPtr.Zero, 16 * 4 * numMatrices, pose);
+				GL.BindBuffer(BufferTarget.UniformBuffer, 0);
+			}
+
+			public void ResetPose()
+			{
+				Matrix4[] pose = new Matrix4[SHADER_MAX_BONES];
+				for (int i = 0; i < pose.Length; ++i)
+				{
+					pose[i] = Matrix4.Identity;
+				}
+
+				SetPose(pose);
+			}
+			
+			public void SetDiffuseMap(int texId)
+			{
+				GL.Uniform1(m_uDiffuseMap, texId);
 			}
 
 			public void SetEnableDiffuse(bool enableDiffuse)
@@ -99,12 +156,42 @@ namespace AssetStudioGUI
 			{
 				GL.UniformMatrix4(m_uModelWorld, false, ref worldMatrix);
 			}
+
+			public void SetViewMatrix(ref Matrix4 viewMatrix)
+			{
+				GL.UniformMatrix4(m_uModelView, false, ref viewMatrix);
+			}
+
+			public void SetProjMatrix(ref Matrix4 projMatrix)
+			{
+				GL.UniformMatrix4(m_uModelProj, false, ref projMatrix);
+			}
+
+			public void SetCameraPosition(ref Vector3 position)
+			{
+				GL.Uniform3(m_uCamPos, position);
+			}
+
+			public void SetEnableSkinning(bool enableSkinning)
+			{
+				GL.Uniform1(m_uEnableSkinning, enableSkinning ? 1 : 0);
+			}
+
+			public void Dispose()
+			{
+				GL.DeleteBuffer(m_boneBuffer);
+				m_boneBuffer = 0;
+			}
 		}
 
 		public static readonly int SHADER_ATTRIB_POSITION = 0;
 		public static readonly int SHADER_ATTRIB_NORMAL = 1;
 		public static readonly int SHADER_ATTRIB_UV = 2;
 		public static readonly int SHADER_ATTRIB_COLOR = 3;
+		public static readonly int SHADER_ATTRIB_BONEWEIGHT = 4;
+		public static readonly int SHADER_ATTRIB_BONEIDX = 5;
+
+		public static readonly int SHADER_MAX_BONES = 200;
 
 		private GLControl m_Control;
 		private Size m_Size;
@@ -119,9 +206,6 @@ namespace AssetStudioGUI
 
 		// shaders
 		private int m_ModelShader;
-		private int m_uModelWorld, m_uModelView, m_uModelProj, 
-			m_uCamPos, m_uDiffuseMap, m_uEnableDiffuseMap;
-
 		private RenderStateImpl m_state;
 
 		// camera settings
@@ -157,14 +241,7 @@ namespace AssetStudioGUI
 				Encoding.Default.GetString(Properties.Resources.modelShaderVS),
 				Encoding.Default.GetString(Properties.Resources.modelShaderFS));
 
-			m_uModelWorld = GL.GetUniformLocation(m_ModelShader, "u_world");
-			m_uModelView = GL.GetUniformLocation(m_ModelShader, "u_view");
-			m_uModelProj = GL.GetUniformLocation(m_ModelShader, "u_projection");
-			m_uCamPos = GL.GetUniformLocation(m_ModelShader, "u_cam_position");
-			m_uDiffuseMap = GL.GetUniformLocation(m_ModelShader, "u_diffuse_map");
-			m_uEnableDiffuseMap = GL.GetUniformLocation(m_ModelShader, "u_enable_diffuse_map");
-
-			m_state = new RenderStateImpl(m_uModelWorld, m_uEnableDiffuseMap);
+			m_state = new RenderStateImpl(m_ModelShader);
 
 			m_pitch = 0.0f;
 			m_yaw = 0.0f;
@@ -203,12 +280,15 @@ namespace AssetStudioGUI
 			if (m_mesh != null)
 			{
 				GL.UseProgram(m_ModelShader);
-				GL.UniformMatrix4(m_uModelView, false, ref m_viewMatrix);
-				GL.UniformMatrix4(m_uModelProj, false, ref m_projMatrix);
-				GL.UniformMatrix4(m_uModelWorld, false, ref m_modelMatrix);
-				GL.Uniform3(m_uCamPos, cameraPosition.Xyz);
-				GL.Uniform1(m_uDiffuseMap, 0);
-				GL.UniformMatrix4(m_uModelProj, false, ref m_projMatrix);
+
+				var cameraPosVector = cameraPosition.Xyz;
+
+				m_state.SetViewMatrix(ref m_viewMatrix);
+				m_state.SetProjMatrix(ref m_projMatrix);
+				m_state.SetWorldMatrix(ref m_modelMatrix);
+				m_state.SetCameraPosition(ref cameraPosVector);
+				m_state.SetDiffuseMap(0);
+
 				GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
 
 				m_mesh.Draw(m_state, m_modelMatrix);
@@ -293,6 +373,9 @@ namespace AssetStudioGUI
 
 		private void DisposeBuffers()
 		{
+			m_state.Dispose();
+			m_state = null;
+
 			m_mesh.Dispose();
 			m_mesh = null;
 		}
@@ -347,6 +430,18 @@ namespace AssetStudioGUI
 									data,
 									BufferUsageHint.StaticDraw);
 			GL.VertexAttribPointer(address, 4, VertexAttribPointerType.Float, false, 0, 0);
+			GL.EnableVertexAttribArray(address);
+		}
+
+		public static void CreateVBO(out int vboAddress, Vector4i[] data, int address)
+		{
+			GL.GenBuffers(1, out vboAddress);
+			GL.BindBuffer(BufferTarget.ArrayBuffer, vboAddress);
+			GL.BufferData(BufferTarget.ArrayBuffer,
+									(IntPtr)(data.Length * Vector4i.SizeInBytes),
+									data,
+									BufferUsageHint.StaticDraw);
+			GL.VertexAttribIPointer(address, 4, VertexAttribIntegerType.Int, 0, IntPtr.Zero);
 			GL.EnableVertexAttribArray(address);
 		}
 	}

@@ -59,13 +59,17 @@ namespace AssetStudioGUI
 
 		class ModelMesh : IDisposable
 		{
-			private int m_vbPosition, m_vbUv, m_vbNormal, m_vbColor, m_vbIndex;
+			private int m_vbPosition, m_vbUv, m_vbNormal, m_vbColor, m_vbIndex, m_vbBoneWeight, m_vbBoneIdx;
 			private int m_vao;
 			private int m_numIndices;
 
 			private Material m_material;
 
-			public ModelMesh(Material material, Vector3[] positions, Vector2[] uvs, Vector3[] normals, Vector4[] colors, int[] indices)
+			public ModelMesh(
+				Material material, Vector3[] positions, 
+				Vector2[] uvs, Vector3[] normals, 
+				Vector4[] colors, Vector4[] boneWeights, 
+				Vector4i[] boneIndices, int[] indices)
 			{
 				m_material = material;
 
@@ -76,6 +80,8 @@ namespace AssetStudioGUI
 				Renderer.CreateVBO(out m_vbNormal, normals, Renderer.SHADER_ATTRIB_NORMAL);
 				Renderer.CreateVBO(out m_vbColor, colors, Renderer.SHADER_ATTRIB_COLOR);
 				Renderer.CreateVBO(out m_vbUv, uvs, Renderer.SHADER_ATTRIB_UV);
+				Renderer.CreateVBO(out m_vbBoneWeight, boneWeights, Renderer.SHADER_ATTRIB_BONEWEIGHT);
+				Renderer.CreateVBO(out m_vbBoneIdx, boneIndices, Renderer.SHADER_ATTRIB_BONEIDX);
 				Renderer.CreateEBO(out m_vbIndex, indices);
 
 				GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
@@ -92,6 +98,8 @@ namespace AssetStudioGUI
 				GL.DeleteBuffer(m_vbColor);
 				GL.DeleteBuffer(m_vbIndex);
 				GL.DeleteBuffer(m_vbUv);
+				GL.DeleteBuffer(m_vbBoneWeight);
+				GL.DeleteBuffer(m_vbBoneIdx);
 			}
 
 			public void Bind()
@@ -118,6 +126,8 @@ namespace AssetStudioGUI
 				var uvs = new Vector2[numVertices];
 				var normals = new Vector3[numVertices];
 				var colors = new Vector4[numVertices];
+				var boneweights = new Vector4[numVertices];
+				var boneidx = new Vector4i[numVertices];
 				var indices = new int[submesh.FaceList.Count * 3];
 
 				for (int i = 0; i < numVertices; i++)
@@ -140,6 +150,25 @@ namespace AssetStudioGUI
 					// TODO: support other texture coordinates in display mode
 					uvs[i].X = vertex.UV[0][0];
 					uvs[i].Y = vertex.UV[0][1];
+
+					if (vertex.BoneIndices.Length > 4)
+					{
+						throw new Exception("vertex with more than 4 bones assigned");
+					}
+
+					for (int j = 0; j < 4; ++j)
+					{
+						if (j < vertex.BoneIndices.Length)
+						{
+							boneweights[i][j] = vertex.Weights[j];
+							boneidx[i][j] = vertex.BoneIndices[j];
+						} 
+						else
+						{
+							boneweights[i][j] = 0.0f;
+							boneidx[i][j] = 0;
+						}
+					}
 				}
 
 				for (int f = 0; f < submesh.FaceList.Count; ++f)
@@ -154,7 +183,7 @@ namespace AssetStudioGUI
 					indices[3 * f + 2] = submesh.FaceList[f].VertexIndices[2] + submesh.BaseVertex;
 				}
 
-				return new ModelMesh(material, positions, uvs, normals, colors, indices);
+				return new ModelMesh(material, positions, uvs, normals, colors, boneweights, boneidx, indices);
 			}
 		}
 
