@@ -67,10 +67,12 @@ namespace AssetStudioGUI
 		class DrawableDisplayModel : IDrawable
 		{
 			private readonly DisplayModel m_mesh;
+			private readonly DisplayModel.IModelPose m_pose;
 
 			public DrawableDisplayModel(DisplayModel mesh)
 			{
 				m_mesh = mesh;
+				m_pose = mesh.CreatePose();
 			}
 
 			public void Dispose()
@@ -83,7 +85,7 @@ namespace AssetStudioGUI
 				state.SetWorldMatrix(ref worldMatrix);
 				state.SetEnableDiffuse(false);
 				state.SetEnableSkinning(true);
-				state.ResetPose();
+				state.SetPose(m_pose.GetCurrentPose());
 
 				m_mesh.Draw(state, worldMatrix);
 			}

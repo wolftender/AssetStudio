@@ -57,6 +57,110 @@ namespace AssetStudioGUI
 			}
 		}
 
+		public interface IModelPose
+		{
+			void SetBindPose();
+			void SetTransform(int nodeId, Matrix4 transform);
+
+			int GetIdFromPath(string path);
+			int GetParent(int nodeId);
+
+			Matrix4[] GetCurrentPose();
+		}
+
+		class ModelPose : ICloneable, IModelPose
+		{
+			private Dictionary<string, int> m_boneIdByPath;
+			private Matrix4[] m_transformById;
+
+			private int[] m_parentById;
+			private int m_numNodes;
+
+			public ModelPose()
+			{
+				m_boneIdByPath = new Dictionary<string, int>();
+				m_numNodes = 0;
+
+				m_transformById = new Matrix4[Renderer.SHADER_MAX_BONES];
+				m_parentById = new int[Renderer.SHADER_MAX_BONES];
+			}
+
+			public int InsertNode(int parent, string path)
+			{
+				if (m_numNodes > Renderer.SHADER_MAX_BONES)
+				{
+					throw new Exception($"cannot exceed {Renderer.SHADER_MAX_BONES} bones in a model");
+				}
+
+				int nodeId = m_numNodes;
+				m_numNodes++;
+
+				m_transformById[nodeId] = Matrix4.Identity;
+				m_parentById[nodeId] = parent;
+				m_boneIdByPath.Add(path, nodeId);
+
+				return nodeId;
+			}
+
+			public object Clone()
+			{
+				var pose = new ModelPose();
+
+				pose.m_transformById = (Matrix4[]) m_transformById.Clone();
+				pose.m_parentById = (int[]) m_parentById.Clone();
+				pose.m_boneIdByPath = new Dictionary<string, int>();
+
+				foreach (var entry in m_boneIdByPath)
+				{
+					pose.m_boneIdByPath[entry.Key] = entry.Value;
+				}
+
+				pose.m_numNodes = m_numNodes;
+				return pose;
+			}
+
+			public void SetBindPose()
+			{
+				for (int i = 0; i < m_numNodes; ++i)
+				{
+					m_transformById[i] = Matrix4.Identity;
+				}
+			}
+
+			public void SetTransform(int nodeId, Matrix4 transform)
+			{
+				if (nodeId > 0 && nodeId <  m_numNodes)
+				{
+					m_transformById[nodeId] = transform;
+				}
+			}
+
+			public int GetIdFromPath(string path)
+			{
+				if (m_boneIdByPath.ContainsKey(path))
+				{
+					return m_boneIdByPath[path];
+				}
+
+				return -1;
+			}
+
+			public int GetParent(int nodeId)
+			{
+				if (nodeId > 0 && nodeId < m_numNodes)
+				{
+					return m_parentById[nodeId];
+				}
+
+				return -1;
+			}
+
+			public Matrix4[] GetCurrentPose()
+			{
+				return m_transformById;
+			}
+		}
+
 		class ModelMesh : IDisposable
 		{
 			private int m_vbPosition, m_vbUv, m_vbNormal, m_vbColor, m_vbIndex, m_vbBoneWeight, m_vbBoneIdx;
@@ -117,7 +221,7 @@ namespace AssetStudioGUI
 				GL.DrawElements(BeginMode.Triangles, m_numIndices, DrawElementsType.UnsignedInt, 0);
 			}
 
-			public static ModelMesh FromImportedMesh(Material material, ImportedMesh mesh, ImportedSubmesh submesh)
+			public static ModelMesh FromImportedMesh(ModelPose pose, Material material, ImportedMesh mesh, ImportedSubmesh submesh)
 			{
 				// TODO: what if model has no normals? (cope)
 				var numVertices = mesh.VertexList.Count;
@@ -130,6 +234,24 @@ namespace AssetStudioGUI
 				var boneidx = new Vector4i[numVertices];
 				var indices = new int[submesh.FaceList.Count * 3];
 
+				// create lookup table for bones
+				// relation for bones is a bit complicated in this place
+				// a mesh has its own list of bones, but those are merely references to nodes in model hierarchy
+				// since we want only one uniform buffer per model we need to translate "mesh" bone id to "model" bone id
+				var nodeByBone = new int[mesh.BoneList.Count];
+				for (int i = 0; i < nodeByBone.Length; i++)
+				{
+					var path = mesh.BoneList[i].Path;
+					int refNodeId = pose.GetIdFromPath(path);
+					if (refNodeId < 0)
+					{
+						throw new Exception($"bone references invalid node path {path}");
+					}
+
+					nodeByBone[i] = refNodeId;
+				}
+
+				// fill out buffers that are going to be uploaded to the gpu
 				for (int i = 0; i < numVertices; i++)
 				{
 					var vertex = mesh.VertexList[i];
@@ -161,7 +283,7 @@ namespace AssetStudioGUI
 						if (j < vertex.BoneIndices.Length)
 						{
 							boneweights[i][j] = vertex.Weights[j];
-							boneidx[i][j] = vertex.BoneIndices[j];
+							boneidx[i][j] = nodeByBone[vertex.BoneIndices[j]]; // translate to "model" bone id
 						} 
 						else
 						{
@@ -195,8 +317,17 @@ namespace AssetStudioGUI
 			public List<ModelMesh> meshes { get; set; }
 			public List<ModelNode> children { get; set; }
 
-			public ModelNode(string name)
+			private int m_id;
+
+			public int Id
 			{
+				get { return m_id; }
+			}
+
+			public ModelNode(int nodeId, string name)
+			{
+				m_id = nodeId;
+
 				this.name = name;
 				transform = Matrix4.Identity;
 
@@ -242,6 +373,7 @@ namespace AssetStudioGUI
 		// model class implemantation starts here
 		List<KeyValuePair<string, Material>> m_materials;
 		ModelNode m_rootNode;
+		ModelPose m_pose;
 
 		private DisplayModel()
 		{
@@ -266,6 +398,11 @@ namespace AssetStudioGUI
 			}
 		}
 
+		public IModelPose CreatePose()
+		{
+			return (IModelPose)m_pose.Clone();
+		}
+
 		private static Vector3 AssetStudioVecToOpenTK(AssetStudio.Vector3 vector)
 		{
 			return new Vector3(vector.X, vector.Y, vector.Z);
@@ -281,11 +418,16 @@ namespace AssetStudioGUI
 			nodeStack.Push(convert.RootFrame);
 
 			DisplayModel model = new DisplayModel();
+			List<KeyValuePair<ModelNode, ImportedMesh>> meshLoadList = new List<KeyValuePair<ModelNode, ImportedMesh>>();
+
+			model.m_pose = new ModelPose();
 
 			while (nodeStack.Count > 0)
 			{
 				var frame = nodeStack.Pop();
 
+				// pop parent from the stack, if no parent then root node
+				// probably should assert only one root exists?
 				ModelNode parentNode = null;
 				if (parentStack.Count > 0)
 				{
@@ -296,7 +438,16 @@ namespace AssetStudioGUI
 
 				Debug.WriteLine($"Parsing frame {frame.Name}...");
 
-				var node = new ModelNode(frame.Name);
+				int parentId = -1;
+				if (parentNode != null)
+				{
+					parentId = parentNode.Id;
+				}
+
+				var nodeId = model.m_pose.InsertNode(parentId, frame.Path);
+				var node = new ModelNode(nodeId, frame.Name);
+
+				// node transform
 				var translation = AssetStudioVecToOpenTK(frame.LocalPosition);
 				var rotation = AssetStudioVecToOpenTK(frame.LocalRotation);
 				var scale = AssetStudioVecToOpenTK(frame.LocalScale);
@@ -309,86 +460,103 @@ namespace AssetStudioGUI
 					Matrix4.CreateScale(scale);
 				node.transform = localMatrix;
 
+				// add mesh to load list if exists
 				if (importedMesh != null)
 				{
-					foreach (var importedSubmesh in importedMesh.SubmeshList)
-					{
-						Material material = null;
-						var importedMaterial = ImportedHelpers.FindMaterial(importedSubmesh.Material, convert.MaterialList);
-						
-						if (importedMaterial != null)
-						{
-							var prevMaterial = model.m_materials.FindIndex(kv => kv.Key == importedMaterial.Name);
-							
-							if (prevMaterial >= 0)
-							{
-								material = model.m_materials[prevMaterial].Value;
-							} 
-							else if (importedMaterial.Textures.Count != 0)
-							{
-								material = new Material();
-								
-								var diffuseName = importedMaterial.Textures[0].Name;
-								var diffuseMap = ImportedHelpers.FindTexture(diffuseName, convert.TextureList);
-
-								// TODO: bad coding practice
-								Bitmap srcBitmap;
-								using (var ms = new MemoryStream(diffuseMap.Data))
-								{
-									srcBitmap = new Bitmap(ms);
-								}
-
-								var bitmap = new Bitmap(srcBitmap.Width, srcBitmap.Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-
-								using (Graphics gr = Graphics.FromImage(bitmap))
-								{
-									gr.DrawImage(srcBitmap, new Rectangle(0, 0, srcBitmap.Width, srcBitmap.Height));
-								}
-
-								BitmapData bmData = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), 
-									ImageLockMode.ReadOnly, bitmap.PixelFormat);
-
-								var stride = bmData.Stride;
-								byte[] data = new byte[stride * bitmap.Height];
-								Marshal.Copy(bmData.Scan0, data, 0, data.Length);
-								bitmap.UnlockBits(bmData);
-
-								for (int i = 0; i < data.Length; i = i + 3)
-								{
-									var b = data[i + 0];
-									var g = data[i + 1];
-									var r = data[i + 2];
-
-									data[i + 0] = r;
-									data[i + 1] = g;
-									data[i + 2] = b;
-								}
-
-								material.AttachDiffuse(bitmap.Width, bitmap.Height, data);
-
-								srcBitmap.Dispose();
-								bitmap.Dispose();
-							}
-						}
-
-						node.meshes.Add(ModelMesh.FromImportedMesh(material, importedMesh, importedSubmesh));
-					}
+					meshLoadList.Add(new KeyValuePair<ModelNode, ImportedMesh>(node, importedMesh));
 				}
 
+				// if this is a child node then add it to the parent
 				if (parentNode != null)
 				{
 					parentNode.children.Add(node);
 				}
 				else
 				{
-					model.m_rootNode = node;
+					model.m_rootNode = node; // not a child, so set as root
 				}
 
+				// push all children on the stack, push self as parent for the children on the stack
 				for (var i = frame.Count - 1; i >= 0; i -= 1)
 				{
 					var child = frame[i];
 					nodeStack.Push(child);
 					parentStack.Push(node);
+				}
+			}
+
+			// model frame is initialized, now we can initialize the meshes
+			// this is done because we need the WHOLE frame to initialize bones
+			foreach (var pair in meshLoadList)
+			{
+				var node = pair.Key;
+				var importedMesh = pair.Value;
+
+				// mesh is built from submeshes
+				// for rendering each submesh is simply a component VAO with own vertex buffers
+				foreach (var importedSubmesh in importedMesh.SubmeshList)
+				{
+					Material material = null;
+					var importedMaterial = ImportedHelpers.FindMaterial(importedSubmesh.Material, convert.MaterialList);
+
+					if (importedMaterial != null)
+					{
+						var prevMaterial = model.m_materials.FindIndex(kv => kv.Key == importedMaterial.Name);
+
+						if (prevMaterial >= 0)
+						{
+							material = model.m_materials[prevMaterial].Value;
+						}
+						else if (importedMaterial.Textures.Count != 0)
+						{
+							material = new Material();
+
+							var diffuseName = importedMaterial.Textures[0].Name;
+							var diffuseMap = ImportedHelpers.FindTexture(diffuseName, convert.TextureList);
+
+							// TODO: bad coding practice (probably)
+							Bitmap srcBitmap;
+							using (var ms = new MemoryStream(diffuseMap.Data))
+							{
+								srcBitmap = new Bitmap(ms);
+							}
+
+							// convert bitmap to correct pixel format for opengl
+							var bitmap = new Bitmap(srcBitmap.Width, srcBitmap.Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+
+							using (Graphics gr = Graphics.FromImage(bitmap))
+							{
+								gr.DrawImage(srcBitmap, new Rectangle(0, 0, srcBitmap.Width, srcBitmap.Height));
+							}
+
+							BitmapData bmData = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+								ImageLockMode.ReadOnly, bitmap.PixelFormat);
+
+							var stride = bmData.Stride;
+							byte[] data = new byte[stride * bitmap.Height];
+							Marshal.Copy(bmData.Scan0, data, 0, data.Length);
+							bitmap.UnlockBits(bmData);
+
+							// for some reason bitmap class returns bytes in order BRG instead of RGB, so we need to swap them for opengl
+							for (int i = 0; i < data.Length; i = i + 3)
+							{
+								var b = data[i + 0];
+								var g = data[i + 1];
+								var r = data[i + 2];
+
+								data[i + 0] = r;
+								data[i + 1] = g;
+								data[i + 2] = b;
+							}
+
+							material.AttachDiffuse(bitmap.Width, bitmap.Height, data);
+
+							srcBitmap.Dispose();
+							bitmap.Dispose();
+						}
+					}
+
+					node.meshes.Add(ModelMesh.FromImportedMesh(model.m_pose, material, importedMesh, importedSubmesh));
 				}
 			}
 
